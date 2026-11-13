@@ -3,123 +3,90 @@ const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 const fs = require('fs');
+const multer = require('multer');
 
 const app = express();
 const server = http.createServer(app);
+
+// Настройка CORS и транспорта (polling для обхода блокировок)
 const io = new Server(server, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
-  }
+  },
+  transports: ['polling', 'websocket'] 
 });
 
 const PORT = process.env.PORT || 3000;
-const HISTORY_FILE = path.join(__dirname, 'history.json');
-const MAX_HISTORY = 200;
 
-// ---------- Хранилище истории ----------
-let history = [];
-if (fs.existsSync(HISTORY_FILE)) {
-  try {
-    history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
-  } catch (e) {
-    history = [];
-  }
+// --- Настройка папки для голосовых сообщений ---
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir);
 }
 
-function saveHistory() {
-  try {
-    fs.writeFileSync(HISTORY_FILE, JSON.stringify(history.slice(-MAX_HISTORY), null, 2));
-  } catch (e) {
-    console.error('Ошибка сохранения истории:', e);
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + '.webm');
   }
-}
+});
+const upload = multer({ storage: storage });
 
-// ---------- Онлайн-пользователи ----------
-const onlineUsers = new Map(); // socket.id -> username
-
-// ---------- Раздача фронтенда ----------
+// --- Раздача статики ---
 app.use(express.static(__dirname));
+app.use('/uploads', express.static(uploadDir));
+
+// Эндпоинт для получения аудио с клиента
+app.post('/upload', upload.single('audio'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Файл не загружен' });
+  res.json({ url: `/uploads/${req.file.filename}` });
+});
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// ---------- Socket.io ----------
-io.on('connection', (socket) => {
-  console.log('Подключился:', socket.id);
+// --- Логика Socket.io ---
+let history = [];
+const onlineUsers = new Map();
 
-  // Регистрация с ником
+io.on('connection', (socket) => {
   socket.on('join', (username) => {
     username = String(username || '').trim().slice(0, 20);
     if (!username) return;
-
-    // Если ник занят — добавляем цифру
-    let finalName = username;
-    let counter = 1;
-    while ([...onlineUsers.values()].includes(finalName)) {
-      finalName = `${username}${counter++}`;
-    }
-
-    onlineUsers.set(socket.id, finalName);
-    socket.username = finalName;
-
-    // Отправляем новичку историю
+    onlineUsers.set(socket.id, username);
+    socket.username = username;
     socket.emit('history', history);
-
-    // Всем — обновлённый список онлайн
     io.emit('online', [...onlineUsers.values()]);
-
-    // Системное сообщение
-    const sysMsg = {
-      type: 'system',
-      text: `${finalName} присоединился к чату`,
-      time: Date.now()
-    };
-    io.emit('message', sysMsg);
+    io.emit('message', { type: 'system', text: `${username} присоединился`, time: Date.now() });
   });
 
-  // Новое сообщение
-  socket.on('message', (text) => {
+  socket.on('message', (data) => {
     if (!socket.username) return;
-    text = String(text || '').trim().slice(0, 1000);
-    if (!text) return;
-
     const msg = {
       type: 'user',
       username: socket.username,
-      text,
+      text: data.text || '',
+      audioUrl: data.audioUrl || null,
       time: Date.now()
     };
-
     history.push(msg);
-    if (history.length > MAX_HISTORY) history.shift();
-    saveHistory();
-
+    if (history.length > 200) history.shift();
     io.emit('message', msg);
   });
 
-  // Индикатор «печатает...»
   socket.on('typing', (isTyping) => {
     if (!socket.username) return;
-    socket.broadcast.emit('typing', {
-      username: socket.username,
-      isTyping: !!isTyping
-    });
+    socket.broadcast.emit('typing', { username: socket.username, isTyping: !!isTyping });
   });
 
-  // Отключение
   socket.on('disconnect', () => {
     if (socket.username) {
       onlineUsers.delete(socket.id);
       io.emit('online', [...onlineUsers.values()]);
-
-      const sysMsg = {
-        type: 'system',
-        text: `${socket.username} покинул чат`,
-        time: Date.now()
-      };
-      io.emit('message', sysMsg);
+      io.emit('message', { type: 'system', text: `${socket.username} покинул чат`, time: Date.now() });
     }
   });
 });
