@@ -9,7 +9,6 @@
   --glass-bg: rgba(25, 25, 35, 0.45);
   --glass-bg-hover: rgba(255, 255, 255, 0.08);
   --glass-border: rgba(255, 255, 255, 0.1);
-  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
   --accent: #a855f7;
   --accent-glow: rgba(168, 85, 247, 0.4);
   --text-normal: #e2e8f0;
@@ -24,7 +23,6 @@ html, body {
   height: 100vh;
   overflow: hidden;
   color: var(--text-normal);
-  /* Градиентный фон с пятнами */
   background: radial-gradient(circle at 15% 50%, rgba(76, 29, 149, 0.4), transparent 50%),
               radial-gradient(circle at 85% 30%, rgba(14, 165, 233, 0.3), transparent 50%),
               radial-gradient(circle at 50% 80%, rgba(168, 85, 247, 0.3), transparent 50%),
@@ -50,7 +48,7 @@ html, body {
   border-radius: 24px;
   width: 100%;
   max-width: 400px;
-  box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255,255,255,0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255,255,255,0.1);
   text-align: center;
 }
 
@@ -108,18 +106,17 @@ html, body {
   display: flex;
   width: 100vw;
   height: 100vh;
-  padding: 16px; /* Отступы для стеклянного эффекта */
+  padding: 16px;
   gap: 16px;
 }
 
-/* Общий стиль для панелей */
 .server-list, .channel-sidebar, .chat-main {
   background: var(--glass-bg);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--glass-border);
   border-radius: 20px;
-  box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255,255,255,0.05);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255,255,255,0.05);
   overflow: hidden;
 }
 
@@ -247,16 +244,17 @@ html, body {
 .user-panel-status { font-size: 12px; color: var(--green); display: flex; align-items: center; gap: 4px;}
 .user-panel-status::before { content: ''; display: inline-block; width: 6px; height: 6px; background: var(--green); border-radius: 50%; }
 
-.btn-leave {
+.btn-notify, .btn-leave {
   background: transparent;
   color: var(--text-muted);
   border: none;
-  font-size: 20px;
+  font-size: 18px;
   cursor: pointer;
-  padding: 8px;
+  padding: 6px;
   border-radius: 8px;
   transition: all 0.2s;
 }
+.btn-notify:hover { color: var(--accent); background: rgba(168, 85, 247, 0.1); }
 .btn-leave:hover { color: var(--red); background: rgba(239, 68, 68, 0.1); }
 
 /* 3. Чат */
@@ -331,7 +329,7 @@ html, body {
   box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
 }
 
-.bubble-container { flex: 1; min-width: 0; }
+.bubble-container { flex: 1; min-width: 0; position: relative; }
 
 .bubble-author {
   font-size: 15px;
@@ -344,16 +342,23 @@ html, body {
 }
 .bubble-time { font-size: 12px; color: var(--text-muted); font-weight: 400; }
 
+.bubble-content-wrapper {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
 .bubble-text-content {
   font-size: 15px;
   line-height: 1.5;
   color: var(--text-normal);
   word-wrap: break-word;
-  background: rgba(255, 255, 255, 0.03);
-  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 10px 16px;
   border-radius: 4px 16px 16px 16px;
   display: inline-block;
   border: 1px solid rgba(255,255,255,0.05);
+  max-width: 100%;
 }
 .bubble-text { white-space: pre-wrap; }
 
@@ -361,6 +366,23 @@ html, body {
   background: rgba(168, 85, 247, 0.15);
   border-color: rgba(168, 85, 247, 0.3);
   border-radius: 16px 4px 16px 16px;
+}
+.msg-row.mine { flex-direction: row-reverse; }
+.msg-row.mine .bubble-author { justify-content: flex-end; }
+
+.bubble-status {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.reply-preview {
+  font-size: 12px;
+  color: var(--accent);
+  margin-bottom: 4px;
+  font-style: italic;
+  border-left: 2px solid var(--accent);
+  padding-left: 8px;
 }
 
 .msg.system {
@@ -378,7 +400,54 @@ html, body {
 .bubble-audio { margin-top: 6px; }
 .bubble-audio audio { width: 100%; max-width: 300px; height: 40px; border-radius: 10px; outline: none; }
 
+/* Реакции и действия */
+.reactions-container { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+.reaction-badge {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.reaction-badge:hover { background: rgba(255,255,255,0.1); }
+.reaction-badge.my-reaction { background: rgba(168, 85, 247, 0.2); border-color: var(--accent); }
+
+.msg-actions {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: -30px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 4px;
+  gap: 4px;
+  z-index: 10;
+}
+.msg-row:hover .msg-actions { display: flex; }
+.msg-actions button {
+  background: transparent; border: none; cursor: pointer;
+  font-size: 16px; padding: 4px 8px; border-radius: 4px; color: var(--text-normal);
+}
+.msg-actions button:hover { background: rgba(255,255,255,0.1); }
+
 /* Поле ввода */
+.reply-block {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(168, 85, 247, 0.1);
+  border-top: 1px solid rgba(168, 85, 247, 0.3);
+  padding: 8px 16px;
+  font-size: 13px;
+}
+.reply-content { display: flex; gap: 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.reply-label { color: var(--accent); font-weight: bold; }
+.reply-close { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 16px; }
+
 .typing-indicator {
   height: 24px;
   padding: 0 24px;
@@ -408,4 +477,83 @@ html, body {
   color: var(--text-normal);
   outline: none;
   font-size: 15px;
-  transition: all 0.2s
+  transition: all 0.2s;
+}
+.input-bar input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+
+.btn-send, .btn-mic {
+  width: 48px; height: 48px;
+  border: none;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-normal);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.2s;
+  border: 1px solid var(--glass-border);
+}
+.btn-send:hover, .btn-mic:hover { background: rgba(255, 255, 255, 0.1); }
+.btn-send { background: var(--accent); color: white; border-color: var(--accent); }
+.btn-send:hover { background: #9333ea; }
+
+.btn-mic.recording { color: white; background: var(--red); border-color: var(--red); animation: pulseMic 1s infinite; }
+@keyframes pulseMic {
+  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+  70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+/* Модальное окно */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  backdrop-filter: blur(5px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal-box {
+  background: var(--glass-bg);
+  backdrop-filter: blur(24px);
+  border: 1px solid var(--glass-border);
+  padding: 24px;
+  border-radius: 20px;
+  width: 100%;
+  max-width: 400px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  text-align: center;
+}
+
+.modal-box h2 { font-size: 22px; color: var(--text-header); margin-bottom: 8px; }
+.modal-box p { color: var(--text-muted); font-size: 14px; margin-bottom: 20px; }
+.modal-actions { display: flex; gap: 12px; margin-top: 20px; }
+.btn-cancel, .btn-create {
+  flex: 1;
+  padding: 12px;
+  border: none;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-cancel { background: transparent; color: var(--text-normal); }
+.btn-cancel:hover { background: rgba(255,255,255,0.05); }
+.btn-create { background: var(--accent); color: white; }
+.btn-create:hover { background: #9333ea; }
+
+/* Скроллбары */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+@media (max-width: 700px) {
+  .app-screen { padding: 8px; gap: 8px; }
+  .server-list { width: 60px; }
+  .channel-sidebar { display: none; } /* На телефоне скрываем панель участников */
+  .messages { padding: 12px; }
+  .input-bar { padding: 0 12px 12px 12px; }
+}
