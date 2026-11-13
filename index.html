@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>iMessage</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Экран входа -->
+<div id="loginScreen" class="login-screen">
+  <div class="login-box">
+    <div class="login-icon">💬</div>
+    <h1>Сообщения</h1>
+    <p>Введите ник, чтобы войти в чат</p>
+    <div class="input-wrap">
+      <input type="text" id="nickInput" placeholder="Ваш ник" maxlength="20" autofocus>
+    </div>
+    <button onclick="joinChat()">Войти</button>
+    <div class="login-error" id="loginError"></div>
+  </div>
+</div>
+
+<!-- Основной чат -->
+<div id="chatScreen" class="chat-screen" style="display:none;">
+
+  <!-- Сайдбар слева -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h2>В сети <span class="badge" id="onlineCount">0</span></h2>
+    </div>
+    <ul id="onlineList"></ul>
+  </aside>
+
+  <!-- Основная область -->
+  <div class="chat-main">
+    <header>
+      <div class="header-left">
+        <div class="logo">Сообщения</div>
+      </div>
+      <div class="user-info">
+        <div class="my-avatar" id="myAvatar">?</div>
+        <span id="myName"></span>
+        <button class="btn-leave" onclick="leaveChat()" title="Выйти">Выйти</button>
+      </div>
+    </header>
+
+    <section class="chat-area">
+      <div class="messages" id="messages"></div>
+      <div class="typing-indicator" id="typing"></div>
+      <div class="input-bar">
+        <div class="input-wrap">
+          <input type="text" id="msgInput" placeholder="iMessage" maxlength="1000">
+        </div>
+        <button onclick="sendMessage()" title="Отправить">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 19V5M5 12l7-7 7 7"/>
+          </svg>
+        </button>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+let socket = null;
+let myName = '';
+
+function makeAvatar(name) {
+  const initials = name.trim().slice(0, 2).toUpperCase();
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  const hue = Math.abs(hash) % 360;
+  return {
+    text: initials,
+    color: `linear-gradient(135deg, hsl(${hue}, 70%, 60%), hsl(${(hue + 40) % 360}, 70%, 50%))`
+  };
+}
+
+function joinChat() {
+  const nick = document.getElementById('nickInput').value.trim();
+  const err = document.getElementById('loginError');
+  if (!nick) { err.textContent = 'Введите ник'; return; }
+  if (nick.length < 2) { err.textContent = 'Ник слишком короткий'; return; }
+
+  err.textContent = '';
+  socket = io();
+
+  socket.on('connect', () => socket.emit('join', nick));
+
+  socket.on('history', (messages) => {
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('chatScreen').style.display = 'flex';
+    document.getElementById('myName').textContent = nick;
+    myName = nick;
+
+    const av = makeAvatar(nick);
+    const myAv = document.getElementById('myAvatar');
+    myAv.textContent = av.text;
+    myAv.style.background = av.color;
+
+    const box = document.getElementById('messages');
+    box.innerHTML = '';
+    messages.forEach(renderMessage);
+    scrollToBottom();
+  });
+
+  socket.on('message', (msg) => { renderMessage(msg); scrollToBottom(); });
+
+  socket.on('online', (users) => {
+    document.getElementById('onlineCount').textContent = users.length;
+    const list = document.getElementById('onlineList');
+    list.innerHTML = '';
+    users.forEach(u => {
+      const av = makeAvatar(u);
+      const li = document.createElement('li');
+      li.innerHTML = `
+        <div class="online-avatar" style="background:${av.color}">${av.text}</div>
+        <span class="online-name">${u === myName ? u + ' (вы)' : u}</span>
+        <span class="online-dot"></span>
+      `;
+      if (u === myName) li.classList.add('me');
+      list.appendChild(li);
+    });
+  });
+
+  socket.on('typing', ({ username, isTyping }) => {
+    const el = document.getElementById('typing');
+    if (isTyping) el.textContent = `${username} печатает...`;
+    else if (el.textContent.startsWith(username)) el.textContent = '';
+  });
+}
+
+function sendMessage() {
+  const input = document.getElementById('msgInput');
+  const text = input.value.trim();
+  if (!text || !socket) return;
+  socket.emit('message', text);
+  input.value = '';
+  socket.emit('typing', false);
+}
+
+let typingTimeout = null;
+document.addEventListener('DOMContentLoaded', () => {
+  const input = document.getElementById('msgInput');
+  const nickInput = document.getElementById('nickInput');
+  nickInput.addEventListener('keypress', e => { if (e.key === 'Enter') joinChat(); });
+  input.addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(); });
+  input.addEventListener('input', () => {
+    if (!socket) return;
+    socket.emit('typing', true);
+    clearTimeout(typingTimeout);
+    typingTimeout = setTimeout(() => socket.emit('typing', false), 1500);
+  });
+});
+
+let lastAuthor = null;
+
+function renderMessage(msg) {
+  const box = document.getElementById('messages');
+  if (msg.type === 'system') {
+    const div = document.createElement('div');
+    div.className = 'msg system';
+    div.textContent = msg.text;
+    box.appendChild(div);
+    lastAuthor = null;
+    return;
+  }
+  const isMine = msg.username === myName;
+  const isSameAuthor = msg.username === lastAuthor;
+  const wrapper = document.createElement('div');
+  wrapper.className = 'msg-row ' + (isMine ? 'mine' : 'other');
+  if (isSameAuthor) wrapper.classList.add('grouped');
+  const av = makeAvatar(msg.username);
+  wrapper.innerHTML = `
+    <div class="msg-avatar" style="background:${av.color}">${av.text}</div>
+    <div class="bubble">
+      ${!isSameAuthor ? `<div class="bubble-author">${isMine ? 'Вы' : msg.username}</div>` : ''}
+      <div class="bubble-text"></div>
+      <div class="bubble-time">${new Date(msg.time).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'})}</div>
+    </div>
+  `;
+  wrapper.querySelector('.bubble-text').textContent = msg.text;
+  box.appendChild(wrapper);
+  lastAuthor = msg.username;
+}
+
+function scrollToBottom() {
+  const box = document.getElementById('messages');
+  box.scrollTop = box.scrollHeight;
+}
+
+function leaveChat() {
+  if (socket) socket.disconnect();
+  location.reload();
+}
+</script>
+</body>
+</html>
