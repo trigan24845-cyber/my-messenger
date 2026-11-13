@@ -3,43 +3,66 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>iMessage</title>
+<title>iMessage Комнаты</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<!-- Экран входа -->
+<!-- Экран 1: Вход (Ник) -->
 <div id="loginScreen" class="login-screen">
   <div class="login-box">
     <div class="login-icon">💬</div>
     <h1>Сообщения</h1>
-    <p>Введите ник, чтобы войти в чат</p>
+    <p>Введите ваш ник</p>
     <div class="input-wrap">
       <input type="text" id="nickInput" placeholder="Ваш ник" maxlength="20" autofocus>
     </div>
-    <button onclick="joinChat()">Войти</button>
+    <button onclick="goToRooms()">Далее</button>
     <div class="login-error" id="loginError"></div>
   </div>
 </div>
 
-<!-- Основной чат -->
+<!-- Экран 2: Лобби (Список комнат) -->
+<div id="lobbyScreen" class="lobby-screen" style="display:none;">
+  <div class="login-box" style="max-width: 450px;">
+    <div class="login-icon">🏠</div>
+    <h1>Выберите комнату</h1>
+    <p>Привет, <span id="lobbyNick" style="color:var(--accent); font-weight:bold;"></span>!</p>
+    
+    <div class="room-list" id="roomListContainer">
+      <!-- Сюда будут добавляться комнаты -->
+    </div>
+
+    <div style="margin-top: 20px; border-top: 1px solid var(--glass-border); padding-top: 20px;">
+      <div class="input-wrap">
+        <input type="text" id="newRoomInput" placeholder="Название новой комнаты..." maxlength="30">
+      </div>
+      <button onclick="createRoom()">Создать комнату</button>
+    </div>
+  </div>
+</div>
+
+<!-- Экран 3: Чат -->
 <div id="chatScreen" class="chat-screen" style="display:none;">
   <aside class="sidebar">
     <div class="sidebar-header">
-      <h2>В сети <span class="badge" id="onlineCount">0</span></h2>
+      <h2>В комнате <span class="badge" id="onlineCount">0</span></h2>
+      <div style="font-size: 12px; color: var(--text-muted); margin-top: 5px;" id="currentRoomName">#</div>
     </div>
     <ul id="onlineList"></ul>
+    <div style="margin-top: auto; padding: 10px;">
+      <button class="btn-leave" style="width:100%;" onclick="leaveRoom()">← Выйти в лобби</button>
+    </div>
   </aside>
 
   <div class="chat-main">
     <header>
       <div class="header-left">
-        <div class="logo">Сообщения</div>
+        <div class="logo"># <span id="headerRoomName"></span></div>
       </div>
       <div class="user-info">
         <div class="my-avatar" id="myAvatar">?</div>
         <span id="myName"></span>
-        <button class="btn-leave" onclick="leaveChat()" title="Выйти">Выйти</button>
       </div>
     </header>
 
@@ -48,15 +71,10 @@
       <div class="typing-indicator" id="typing"></div>
       
       <div class="input-bar">
-        <!-- Кнопка записи -->
-        <button id="micBtn" class="btn-mic" title="Записать голосовое" onclick="toggleRecording()">
-          🎤
-        </button>
-        
+        <button id="micBtn" class="btn-mic" title="Записать голосовое" onclick="toggleRecording()">🎤</button>
         <div class="input-wrap">
-          <input type="text" id="msgInput" placeholder="iMessage" maxlength="1000">
+          <input type="text" id="msgInput" placeholder="Сообщение..." maxlength="1000">
         </div>
-        
         <button onclick="sendMessage()" title="Отправить" class="btn-send">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 19V5M5 12l7-7 7 7"/>
@@ -71,6 +89,7 @@
 <script>
 let socket = null;
 let myName = '';
+let currentRoom = '';
 let mediaRecorder = null;
 let audioChunks = [];
 
@@ -85,30 +104,60 @@ function makeAvatar(name) {
   };
 }
 
-function joinChat() {
+// --- 1. Вход ---
+function goToRooms() {
   const nick = document.getElementById('nickInput').value.trim();
   const err = document.getElementById('loginError');
   if (!nick) { err.textContent = 'Введите ник'; return; }
   if (nick.length < 2) { err.textContent = 'Ник слишком короткий'; return; }
 
+  myName = nick;
   err.textContent = '';
+  
+  // Подключаемся к серверу
   socket = io({
-    transports: ['polling', 'websocket'], // Сначала polling (для обхода блокировок)
+    transports: ['polling', 'websocket'],
     reconnection: true,
     reconnectionAttempts: Infinity,
-    reconnectionDelay: 1000,
-    reconnectionDelayMax: 5000
   });
 
-  socket.on('connect', () => socket.emit('join', nick));
-
-  socket.on('history', (messages) => {
+  socket.on('connect', () => {
     document.getElementById('loginScreen').style.display = 'none';
-    document.getElementById('chatScreen').style.display = 'flex';
-    document.getElementById('myName').textContent = nick;
-    myName = nick;
+    document.getElementById('lobbyScreen').style.display = 'flex';
+    document.getElementById('lobbyNick').textContent = myName;
+  });
 
-    const av = makeAvatar(nick);
+  socket.on('roomList', (list) => {
+    const container = document.getElementById('roomListContainer');
+    container.innerHTML = '';
+    
+    if (list.length === 0) {
+      container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center;">Пока нет комнат. Создайте первую!</p>';
+      return;
+    }
+
+    list.forEach(room => {
+      const div = document.createElement('div');
+      div.className = 'room-item';
+      div.innerHTML = `
+        <span style="font-weight:bold; color:#fff;"># ${room.name}</span>
+        <span style="color:var(--accent); font-size:12px;">${room.count} чел.</span>
+      `;
+      div.onclick = () => enterRoom(room.name);
+      container.appendChild(div);
+    });
+  });
+
+  // Обработчики для чата
+  socket.on('history', (messages) => {
+    document.getElementById('lobbyScreen').style.display = 'none';
+    document.getElementById('chatScreen').style.display = 'flex';
+    
+    document.getElementById('myName').textContent = myName;
+    document.getElementById('headerRoomName').textContent = currentRoom;
+    document.getElementById('currentRoomName').textContent = `#${currentRoom}`;
+    
+    const av = makeAvatar(myName);
     const myAv = document.getElementById('myAvatar');
     myAv.textContent = av.text;
     myAv.style.background = av.color;
@@ -121,7 +170,7 @@ function joinChat() {
 
   socket.on('message', (msg) => { renderMessage(msg); scrollToBottom(); });
 
-  socket.on('online', (users) => {
+  socket.on('roomUsers', (users) => {
     document.getElementById('onlineCount').textContent = users.length;
     const list = document.getElementById('onlineList');
     list.innerHTML = '';
@@ -131,7 +180,6 @@ function joinChat() {
       li.innerHTML = `
         <div class="online-avatar" style="background:${av.color}">${av.text}</div>
         <span class="online-name">${u === myName ? u + ' (вы)' : u}</span>
-        <span class="online-dot"></span>
       `;
       if (u === myName) li.classList.add('me');
       list.appendChild(li);
@@ -145,6 +193,26 @@ function joinChat() {
   });
 }
 
+// --- 2. Лобби ---
+function createRoom() {
+  const input = document.getElementById('newRoomInput');
+  const name = input.value.trim();
+  if (!name) return;
+  input.value = '';
+  enterRoom(name);
+}
+
+function enterRoom(roomName) {
+  currentRoom = roomName;
+  socket.emit('joinRoom', { username: myName, roomName: roomName });
+}
+
+function leaveRoom() {
+  if (socket) socket.disconnect();
+  location.reload();
+}
+
+// --- 3. Чат ---
 function sendMessage() {
   const input = document.getElementById('msgInput');
   const text = input.value.trim();
@@ -162,7 +230,6 @@ function sendMessage() {
 async function toggleRecording() {
   const micBtn = document.getElementById('micBtn');
   
-  // Если уже записываем — останавливаем и отправляем
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     mediaRecorder.stop();
     micBtn.classList.remove('recording');
@@ -175,30 +242,22 @@ async function toggleRecording() {
     mediaRecorder = new MediaRecorder(stream);
     audioChunks = [];
 
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) audioChunks.push(e.data);
-    };
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
 
     mediaRecorder.onstop = async () => {
       const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
       const formData = new FormData();
       formData.append('audio', audioBlob, 'voice.webm');
 
-      // Отправляем файл на сервер
       try {
-        const response = await fetch('/upload', {
-          method: 'POST',
-          body: formData
-        });
+        const response = await fetch('/upload', { method: 'POST', body: formData });
         const data = await response.json();
         if (data.url && socket) {
           socket.emit('message', { audioUrl: data.url });
         }
       } catch (err) {
-        alert('Ошибка загрузки голосового: ' + err.message);
+        alert('Ошибка загрузки: ' + err.message);
       }
-      
-      // Отключаем микрофон
       stream.getTracks().forEach(t => t.stop());
     };
 
@@ -210,18 +269,14 @@ async function toggleRecording() {
   }
 }
 
-let typingTimeout = null;
 document.addEventListener('DOMContentLoaded', () => {
   const input = document.getElementById('msgInput');
   const nickInput = document.getElementById('nickInput');
-  nickInput.addEventListener('keypress', e => { if (e.key === 'Enter') joinChat(); });
+  const newRoomInput = document.getElementById('newRoomInput');
+  
+  nickInput.addEventListener('keypress', e => { if (e.key === 'Enter') goToRooms(); });
+  newRoomInput.addEventListener('keypress', e => { if (e.key === 'Enter') createRoom(); });
   input.addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(); });
-  input.addEventListener('input', () => {
-    if (!socket) return;
-    socket.emit('typing', true);
-    clearTimeout(typingTimeout);
-    typingTimeout = setTimeout(() => socket.emit('typing', false), 1500);
-  });
 });
 
 let lastAuthor = null;
@@ -266,11 +321,6 @@ function renderMessage(msg) {
 function scrollToBottom() {
   const box = document.getElementById('messages');
   box.scrollTop = box.scrollHeight;
-}
-
-function leaveChat() {
-  if (socket) socket.disconnect();
-  location.reload();
 }
 </script>
 </body>
