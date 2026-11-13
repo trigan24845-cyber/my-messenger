@@ -24,8 +24,6 @@
 
 <!-- Основной чат -->
 <div id="chatScreen" class="chat-screen" style="display:none;">
-
-  <!-- Сайдбар слева -->
   <aside class="sidebar">
     <div class="sidebar-header">
       <h2>В сети <span class="badge" id="onlineCount">0</span></h2>
@@ -33,7 +31,6 @@
     <ul id="onlineList"></ul>
   </aside>
 
-  <!-- Основная область -->
   <div class="chat-main">
     <header>
       <div class="header-left">
@@ -49,11 +46,18 @@
     <section class="chat-area">
       <div class="messages" id="messages"></div>
       <div class="typing-indicator" id="typing"></div>
+      
       <div class="input-bar">
+        <!-- Кнопка записи -->
+        <button id="micBtn" class="btn-mic" title="Записать голосовое" onclick="toggleRecording()">
+          🎤
+        </button>
+        
         <div class="input-wrap">
           <input type="text" id="msgInput" placeholder="iMessage" maxlength="1000">
         </div>
-        <button onclick="sendMessage()" title="Отправить">
+        
+        <button onclick="sendMessage()" title="Отправить" class="btn-send">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 19V5M5 12l7-7 7 7"/>
           </svg>
@@ -67,6 +71,8 @@
 <script>
 let socket = null;
 let myName = '';
+let mediaRecorder = null;
+let audioChunks = [];
 
 function makeAvatar(name) {
   const initials = name.trim().slice(0, 2).toUpperCase();
@@ -87,7 +93,7 @@ function joinChat() {
 
   err.textContent = '';
   socket = io({
-    transports: ['polling'],
+    transports: ['polling', 'websocket'], // Сначала polling (для обхода блокировок)
     reconnection: true,
     reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
@@ -142,18 +148,66 @@ function joinChat() {
 function sendMessage() {
   const input = document.getElementById('msgInput');
   const text = input.value.trim();
-
-  // Проверка: если сокет не подключен, выводим предупреждение
   if (!socket || !socket.connected) {
-    alert("Соединение с сервером потеряно. Пожалуйста, обновите страницу (F5).");
+    alert("Соединение потеряно. Обновите страницу (F5).");
     return;
   }
-  
   if (!text) return;
-  
-  socket.emit('message', text);
+  socket.emit('message', { text: text });
   input.value = '';
   socket.emit('typing', false);
+}
+
+// --- Запись голосового ---
+async function toggleRecording() {
+  const micBtn = document.getElementById('micBtn');
+  
+  // Если уже записываем — останавливаем и отправляем
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+    micBtn.classList.remove('recording');
+    micBtn.textContent = '🎤';
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream);
+    audioChunks = [];
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = async () => {
+      const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+      const formData = new FormData();
+      formData.append('audio', audioBlob, 'voice.webm');
+
+      // Отправляем файл на сервер
+      try {
+        const response = await fetch('/upload', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await response.json();
+        if (data.url && socket) {
+          socket.emit('message', { audioUrl: data.url });
+        }
+      } catch (err) {
+        alert('Ошибка загрузки голосового: ' + err.message);
+      }
+      
+      // Отключаем микрофон
+      stream.getTracks().forEach(t => t.stop());
+    };
+
+    mediaRecorder.start();
+    micBtn.classList.add('recording');
+    micBtn.textContent = '⏹';
+  } catch (err) {
+    alert('Нет доступа к микрофону: ' + err.message);
+  }
 }
 
 let typingTimeout = null;
@@ -188,15 +242,23 @@ function renderMessage(msg) {
   wrapper.className = 'msg-row ' + (isMine ? 'mine' : 'other');
   if (isSameAuthor) wrapper.classList.add('grouped');
   const av = makeAvatar(msg.username);
+  
+  let contentHTML = '';
+  if (msg.text) contentHTML += `<div class="bubble-text"></div>`;
+  if (msg.audioUrl) {
+    contentHTML += `<div class="bubble-audio"><audio controls preload="none" src="${msg.audioUrl}"></audio></div>`;
+  }
+
   wrapper.innerHTML = `
     <div class="msg-avatar" style="background:${av.color}">${av.text}</div>
     <div class="bubble">
       ${!isSameAuthor ? `<div class="bubble-author">${isMine ? 'Вы' : msg.username}</div>` : ''}
-      <div class="bubble-text"></div>
+      ${contentHTML}
       <div class="bubble-time">${new Date(msg.time).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'})}</div>
     </div>
   `;
-  wrapper.querySelector('.bubble-text').textContent = msg.text;
+  
+  if (msg.text) wrapper.querySelector('.bubble-text').textContent = msg.text;
   box.appendChild(wrapper);
   lastAuthor = msg.username;
 }
