@@ -26,21 +26,15 @@
 <!-- Основной интерфейс -->
 <div id="appScreen" class="app-screen" style="display:none;">
   
-  <!-- Левая панель: Список комнат -->
   <aside class="server-list">
     <div class="server-item home active" title="Главная">🏠</div>
     <div class="separator"></div>
-    <div id="roomListContainer" class="room-list-container">
-      <!-- Комнаты -->
-    </div>
+    <div id="roomListContainer" class="room-list-container"></div>
     <div class="server-item add-room" onclick="showCreateRoom()" title="Создать комнату">+</div>
   </aside>
 
-  <!-- Вторая панель: Участники -->
   <aside class="channel-sidebar">
-    <div class="channel-header" id="currentRoomName">
-      Выберите комнату
-    </div>
+    <div class="channel-header" id="currentRoomName">Выберите комнату</div>
     
     <div class="channel-section">
       <div class="channel-title">УЧАСТНИКИ — <span id="onlineCount">0</span></div>
@@ -53,11 +47,11 @@
         <div class="user-panel-name" id="myName"></div>
         <div class="user-panel-status">В сети</div>
       </div>
+      <button class="btn-notify" onclick="requestNotifications()" title="Включить уведомления">🔔</button>
       <button class="btn-leave" onclick="logout()" title="Выйти">⏻</button>
     </div>
   </aside>
 
-  <!-- Правая часть: Чат -->
   <main class="chat-main">
     <div id="chatPlaceholder" class="chat-placeholder">
       <div class="placeholder-icon">💬</div>
@@ -71,6 +65,16 @@
       </header>
 
       <div class="messages" id="messages"></div>
+      
+      <!-- Блок ответа (скрыт по умолчанию) -->
+      <div id="replyBlock" class="reply-block" style="display:none;">
+        <div class="reply-content">
+          <span class="reply-label">Ответ на:</span>
+          <span id="replyText"></span>
+        </div>
+        <button class="reply-close" onclick="cancelReply()">✕</button>
+      </div>
+
       <div class="typing-indicator" id="typing"></div>
       
       <div class="input-bar">
@@ -109,37 +113,32 @@ let myName = '';
 let currentRoom = '';
 let mediaRecorder = null;
 let audioChunks = [];
+let replyToMsg = null; // Для ответа
+let messageQueue = []; // Очередь сообщений при обрыве
 
 function makeAvatar(name) {
   const initials = name.trim().slice(0, 2).toUpperCase();
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
   const hue = Math.abs(hash) % 360;
-  return {
-    text: initials,
-    color: `hsl(${hue}, 60%, 50%)`
-  };
+  return { text: initials, color: `hsl(${hue}, 60%, 50%)` };
 }
 
-// --- Проверка сохраненного ника при загрузке ---
 window.onload = () => {
   const savedName = localStorage.getItem('chat_username');
   if (savedName) {
     document.getElementById('nickInput').value = savedName;
-    // Автоматически входим
     login();
   }
 };
 
-// --- Вход ---
 function login() {
   const nick = document.getElementById('nickInput').value.trim();
   const err = document.getElementById('loginError');
   if (!nick) { err.textContent = 'Введите ник'; return; }
-  if (nick.length < 2) { err.textContent = 'Ник слишком короткий'; return; }
 
   myName = nick;
-  localStorage.setItem('chat_username', myName); // Сохраняем ник
+  localStorage.setItem('chat_username', myName);
   err.textContent = '';
   
   socket = io({
@@ -151,18 +150,24 @@ function login() {
   socket.on('connect', () => {
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('appScreen').style.display = 'flex';
-    
     document.getElementById('myName').textContent = myName;
     const av = makeAvatar(myName);
     const myAv = document.getElementById('myAvatar');
     myAv.textContent = av.text;
     myAv.style.background = av.color;
+    
+    // Отправляем сообщения из очереди
+    flushQueue();
+  });
+
+  // Отключение
+  socket.on('disconnect', () => {
+    addSystemMessage("Соединение с сервером потеряно. Попытка переподключения...");
   });
 
   socket.on('roomList', (list) => {
     const container = document.getElementById('roomListContainer');
     container.innerHTML = '';
-    
     list.forEach(room => {
       const div = document.createElement('div');
       div.className = 'server-item';
@@ -177,17 +182,43 @@ function login() {
   socket.on('history', (messages) => {
     document.getElementById('chatPlaceholder').style.display = 'none';
     document.getElementById('activeChat').style.display = 'flex';
-    
     document.getElementById('headerRoomName').textContent = currentRoom;
     document.getElementById('currentRoomName').textContent = currentRoom;
 
     const box = document.getElementById('messages');
     box.innerHTML = '';
-    messages.forEach(renderMessage);
+    messages.forEach(msg => renderMessage(msg, true));
     scrollToBottom();
   });
 
-  socket.on('message', (msg) => { renderMessage(msg); scrollToBottom(); });
+  socket.on('message', (msg) => { 
+    renderMessage(msg); 
+    scrollToBottom(); 
+    // Показываем Push-уведомление, если вкладка не активна
+    if (document.hidden && Notification.permission === 'granted') {
+      new Notification(`Новое сообщение в #${currentRoom}`, {
+        body: `${msg.username}: ${msg.text || 'Голосовое сообщение'}`,
+        icon: '/favicon.ico'
+      });
+    }
+  });
+
+  // Обновление статуса "Отправлено"
+  socket.on('messageDelivered', ({ id }) => {
+    const statusEl = document.getElementById(`status-${id}`);
+    if (statusEl) {
+      statusEl.textContent = '✔️';
+      statusEl.style.color = '#22c55e';
+      // Удаляем временное сообщение из очереди, если оно было
+      messageQueue = messageQueue.filter(m => m.tempId !== id);
+    }
+  });
+
+  // Обновление реакций
+  socket.on('updateReactions', ({ messageId, reactions }) => {
+    const container = document.getElementById(`reactions-${messageId}`);
+    if (container) renderReactions(container, messageId, reactions);
+  });
 
   socket.on('roomUsers', (users) => {
     document.getElementById('onlineCount').textContent = users.length;
@@ -213,11 +244,23 @@ function login() {
   });
 }
 
-// --- Выход ---
 function logout() {
-  localStorage.removeItem('chat_username'); // Удаляем ник при выходе
+  localStorage.removeItem('chat_username');
   if (socket) socket.disconnect();
   location.reload();
+}
+
+// --- Уведомления ---
+function requestNotifications() {
+  if (!("Notification" in window)) {
+    alert("Ваш браузер не поддерживает уведомления");
+    return;
+  }
+  Notification.requestPermission().then(permission => {
+    if (permission === "granted") {
+      alert("Уведомления включены!");
+    }
+  });
 }
 
 // --- Комнаты ---
@@ -243,24 +286,72 @@ function enterRoom(roomName) {
   socket.emit('joinRoom', { username: myName, roomName: roomName });
 }
 
-// --- Чат ---
+// --- Отправка сообщений (с очередью) ---
 function sendMessage() {
   const input = document.getElementById('msgInput');
   const text = input.value.trim();
-  if (!socket || !socket.connected) {
-    alert("Соединение потеряно. Обновите страницу (F5).");
-    return;
-  }
   if (!text) return;
-  socket.emit('message', { text: text });
+
+  const tempId = 'temp-' + Date.now();
+  const msgData = { 
+    text, 
+    tempId,
+    replyTo: replyToMsg ? replyToMsg.id : null
+  };
+
+  // 1. Показываем сообщение сразу (Local Echo)
+  renderMessage({ 
+    ...msgData, 
+    id: tempId, 
+    username: myName, 
+    time: Date.now(), 
+    status: '⏳' // В процессе
+  });
+
   input.value = '';
+  cancelReply(); // Сбрасываем ответ
   socket.emit('typing', false);
+
+  // 2. Отправляем на сервер
+  if (socket && socket.connected) {
+    socket.emit('message', msgData);
+  } else {
+    // Если нет связи — в очередь
+    messageQueue.push(msgData);
+    const statusEl = document.getElementById(`status-${tempId}`);
+    if (statusEl) {
+      statusEl.textContent = '⚠️';
+      statusEl.style.color = '#ef4444';
+    }
+  }
+  scrollToBottom();
+}
+
+function flushQueue() {
+  if (messageQueue.length > 0 && socket && socket.connected) {
+    messageQueue.forEach(msg => socket.emit('message', msg));
+    messageQueue = [];
+  }
+}
+
+// --- Ответы на сообщения ---
+function setReply(msg) {
+  replyToMsg = msg;
+  const block = document.getElementById('replyBlock');
+  const txt = document.getElementById('replyText');
+  block.style.display = 'flex';
+  txt.textContent = `${msg.username}: ${msg.text || 'Голосовое'}`;
+  document.getElementById('msgInput').focus();
+}
+
+function cancelReply() {
+  replyToMsg = null;
+  document.getElementById('replyBlock').style.display = 'none';
 }
 
 // --- Голосовые ---
 async function toggleRecording() {
   const micBtn = document.getElementById('micBtn');
-  
   if (mediaRecorder && mediaRecorder.state === 'recording') {
     mediaRecorder.stop();
     micBtn.classList.remove('recording');
@@ -284,7 +375,7 @@ async function toggleRecording() {
         const response = await fetch('/upload', { method: 'POST', body: formData });
         const data = await response.json();
         if (data.url && socket) {
-          socket.emit('message', { audioUrl: data.url });
+          socket.emit('message', { audioUrl: data.url, tempId: 'temp-audio-' + Date.now() });
         }
       } catch (err) {
         alert('Ошибка загрузки: ' + err.message);
@@ -308,25 +399,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
 let lastAuthor = null;
 
-function renderMessage(msg) {
+// --- Рендер сообщений ---
+function renderMessage(msg, isHistory = false) {
   const box = document.getElementById('messages');
+  
   if (msg.type === 'system') {
     const div = document.createElement('div');
     div.className = 'msg system';
     div.textContent = msg.text;
     box.appendChild(div);
-    lastAuthor = null;
     return;
   }
+
   const isMine = msg.username === myName;
-  const isSameAuthor = msg.username === lastAuthor;
+  const isSameAuthor = msg.username === lastAuthor && !msg.replyTo;
   const wrapper = document.createElement('div');
   wrapper.className = 'msg-row ' + (isMine ? 'mine' : 'other');
-  if (isSameAuthor) wrapper.classList.add('grouped');
+  if (isSameAuthor && !isHistory) wrapper.classList.add('grouped');
   
   const av = makeAvatar(msg.username);
   
   let contentHTML = '';
+  if (msg.replyTo) {
+    contentHTML += `<div class="reply-preview">↪ Ответ на сообщение</div>`;
+  }
   if (msg.text) contentHTML += `<div class="bubble-text"></div>`;
   if (msg.audioUrl) {
     contentHTML += `<div class="bubble-audio"><audio controls preload="none" src="${msg.audioUrl}"></audio></div>`;
@@ -336,18 +432,58 @@ function renderMessage(msg) {
     <div class="msg-avatar" style="background:${av.color}">${av.text}</div>
     <div class="bubble-container">
       ${!isSameAuthor ? `<div class="bubble-author">${isMine ? 'Вы' : msg.username} <span class="bubble-time">${new Date(msg.time).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'})}</span></div>` : ''}
-      <div class="bubble-text-content">${contentHTML}</div>
+      <div class="bubble-content-wrapper">
+        <div class="bubble-text-content">${contentHTML}</div>
+        <div class="bubble-status" id="status-${msg.id || msg.tempId}">${msg.status || ''}</div>
+      </div>
+      <div class="reactions-container" id="reactions-${msg.id}"></div>
+      <div class="msg-actions">
+        <button onclick='setReply(${JSON.stringify(msg).replace(/'/g, "&#39;")})'>↪ Ответить</button>
+        <button onclick='addReaction("${msg.id}", "❤️")'>❤️</button>
+        <button onclick='addReaction("${msg.id}", "👍")'>👍</button>
+      </div>
     </div>
   `;
   
   if (msg.text) wrapper.querySelector('.bubble-text').textContent = msg.text;
   box.appendChild(wrapper);
+  
+  if (msg.id) renderReactions(wrapper.querySelector('.reactions-container'), msg.id, msg.reactions);
   lastAuthor = msg.username;
+}
+
+function addReaction(msgId, emoji) {
+  if (!msgId || msgId.startsWith('temp-')) return;
+  socket.emit('react', { messageId: msgId, emoji });
+}
+
+function renderReactions(container, msgId, reactions) {
+  container.innerHTML = '';
+  if (!reactions) return;
+  
+  for (const [emoji, users] of Object.entries(reactions)) {
+    if (users.length === 0) continue;
+    const badge = document.createElement('div');
+    badge.className = 'reaction-badge';
+    if (users.includes(myName)) badge.classList.add('my-reaction');
+    badge.innerHTML = `${emoji} ${users.length}`;
+    badge.onclick = () => addReaction(msgId, emoji);
+    container.appendChild(badge);
+  }
 }
 
 function scrollToBottom() {
   const box = document.getElementById('messages');
   box.scrollTop = box.scrollHeight;
+}
+
+function addSystemMessage(text) {
+  const box = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = 'msg system';
+  div.textContent = text;
+  box.appendChild(div);
+  scrollToBottom();
 }
 </script>
 </body>
