@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Discord Clone</title>
+<title>Glass Chat</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -11,19 +11,19 @@
 <!-- Экран входа -->
 <div id="loginScreen" class="login-screen">
   <div class="login-box">
-    <div class="login-icon" style="font-size: 60px; margin-bottom: 20px;">👾</div>
-    <h1>Добро пожаловать!</h1>
-    <p>Мы рады видеть вас снова!</p>
+    <div class="login-icon" style="font-size: 60px; margin-bottom: 20px;">✨</div>
+    <h1>Glass Chat</h1>
+    <p>Введите ваш ник, чтобы продолжить</p>
     <div class="input-wrap">
-      <label>ИМЯ ПОЛЬЗОВАТЕЛЯ</label>
-      <input type="text" id="nickInput" placeholder="Введите ник" maxlength="20" autofocus>
+      <label>ВАШ НИК</label>
+      <input type="text" id="nickInput" placeholder="Имя" maxlength="20" autofocus>
     </div>
     <button onclick="login()">Войти</button>
     <div class="login-error" id="loginError"></div>
   </div>
 </div>
 
-<!-- Основной интерфейс (Discord-style) -->
+<!-- Основной интерфейс -->
 <div id="appScreen" class="app-screen" style="display:none;">
   
   <!-- Левая панель: Список комнат -->
@@ -31,12 +31,12 @@
     <div class="server-item home active" title="Главная">🏠</div>
     <div class="separator"></div>
     <div id="roomListContainer" class="room-list-container">
-      <!-- Сюда будут добавляться комнаты -->
+      <!-- Комнаты -->
     </div>
     <div class="server-item add-room" onclick="showCreateRoom()" title="Создать комнату">+</div>
   </aside>
 
-  <!-- Вторая панель: Название комнаты и участники -->
+  <!-- Вторая панель: Участники -->
   <aside class="channel-sidebar">
     <div class="channel-header" id="currentRoomName">
       Выберите комнату
@@ -62,7 +62,7 @@
     <div id="chatPlaceholder" class="chat-placeholder">
       <div class="placeholder-icon">💬</div>
       <h2>Добро пожаловать!</h2>
-      <p>Выберите комнату слева или создайте новую, чтобы начать общение.</p>
+      <p>Выберите комнату слева или создайте новую.</p>
     </div>
 
     <div id="activeChat" class="active-chat" style="display:none;">
@@ -90,7 +90,7 @@
 <div id="createRoomModal" class="modal-overlay" style="display:none;">
   <div class="modal-box">
     <h2>Создать комнату</h2>
-    <p>Дайте вашей комнате имя. Вы сможете изменить его позже.</p>
+    <p>Дайте вашей комнате имя.</p>
     <div class="input-wrap">
       <label>НАЗВАНИЕ КОМНАТЫ</label>
       <input type="text" id="newRoomInput" placeholder="например: Игровая" maxlength="30">
@@ -121,6 +121,16 @@ function makeAvatar(name) {
   };
 }
 
+// --- Проверка сохраненного ника при загрузке ---
+window.onload = () => {
+  const savedName = localStorage.getItem('chat_username');
+  if (savedName) {
+    document.getElementById('nickInput').value = savedName;
+    // Автоматически входим
+    login();
+  }
+};
+
 // --- Вход ---
 function login() {
   const nick = document.getElementById('nickInput').value.trim();
@@ -129,6 +139,7 @@ function login() {
   if (nick.length < 2) { err.textContent = 'Ник слишком короткий'; return; }
 
   myName = nick;
+  localStorage.setItem('chat_username', myName); // Сохраняем ник
   err.textContent = '';
   
   socket = io({
@@ -202,6 +213,13 @@ function login() {
   });
 }
 
+// --- Выход ---
+function logout() {
+  localStorage.removeItem('chat_username'); // Удаляем ник при выходе
+  if (socket) socket.disconnect();
+  location.reload();
+}
+
 // --- Комнаты ---
 function showCreateRoom() {
   document.getElementById('createRoomModal').style.display = 'flex';
@@ -223,11 +241,6 @@ function createRoom() {
 function enterRoom(roomName) {
   currentRoom = roomName;
   socket.emit('joinRoom', { username: myName, roomName: roomName });
-}
-
-function logout() {
-  if (socket) socket.disconnect();
-  location.reload();
 }
 
 // --- Чат ---
