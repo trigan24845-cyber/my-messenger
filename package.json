@@ -1,7 +1,7 @@
 {
   "name": "glass-chat",
-  "version": "7.0.0",
-  "description": "Продвинутый мессенджер",
+  "version": "8.0.0",
+  "description": "Мессенджер",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
