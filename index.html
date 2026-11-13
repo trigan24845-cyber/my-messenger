@@ -86,7 +86,12 @@ function joinChat() {
   if (nick.length < 2) { err.textContent = 'Ник слишком короткий'; return; }
 
   err.textContent = '';
-  socket = io();
+  socket = io({
+  reconnection: true,
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 1000,
+  reconnectionDelayMax: 5000,
+});
 
   socket.on('connect', () => socket.emit('join', nick));
 
