@@ -6,7 +6,7 @@
 <title>Glass Chat</title>
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="theme-dark">
 
 <!-- Экран входа -->
 <div id="loginScreen" class="login-screen">
@@ -30,27 +30,28 @@
 <!-- Основной интерфейс -->
 <div id="appScreen" class="app-screen" style="display:none;">
   
-  <aside class="server-list">
+  <button id="mobileMenuBtn" class="mobile-menu-btn" onclick="toggleMobileMenu()">☰</button>
+
+  <aside class="server-list" id="serverList">
     <div class="server-item home active" title="Главная">🏠</div>
     <div class="separator"></div>
     <div id="roomListContainer" class="room-list-container"></div>
     <div class="server-item add-room" onclick="showCreateRoom()" title="Создать комнату">+</div>
   </aside>
 
-  <aside class="channel-sidebar">
+  <aside class="channel-sidebar" id="channelSidebar">
     <div class="channel-header">
-      <span id="currentRoomName">Выберите комнату</span>
-      <button class="btn-room-settings" onclick="showRoomSettings()" title="Настройки комнаты">⚙️</button>
+      <span id="currentRoomName">Выберите чат</span>
+      <button class="btn-room-settings" onclick="showRoomSettings()" title="Настройки">⚙️</button>
     </div>
     
-    <div class="channel-section">
+    <div class="channel-section" id="onlineSection">
       <div class="channel-title">УЧАСТНИКИ — <span id="onlineCount">0</span></div>
       <ul id="onlineList" class="user-list"></ul>
     </div>
 
-    <!-- Друзья -->
     <div class="channel-section" style="border-top: 1px solid var(--glass-border);">
-      <div class="channel-title">ДРУЗЬЯ <button onclick="showInviteModal()" style="float:right; background:none; border:none; color:var(--accent); cursor:pointer;">+</button></div>
+      <div class="channel-title">ДРУЗЬЯ <button onclick="showInviteModal()" style="float:right; background:none; border:none; color:var(--accent); cursor:pointer; font-size:16px;">+</button></div>
       <ul id="friendsList" class="user-list"></ul>
     </div>
 
@@ -60,22 +61,23 @@
         <div class="user-panel-name" id="myName"></div>
         <div class="user-panel-status">В сети</div>
       </div>
+      <button class="btn-theme" onclick="toggleTheme()" title="Тема">🌓</button>
       <button class="btn-notify" onclick="requestNotifications()" title="Уведомления">🔔</button>
       <button class="btn-settings" onclick="showSettings()" title="Настройки">⚙️</button>
       <button class="btn-leave" onclick="logout()" title="Выйти">⏻</button>
     </div>
   </aside>
 
-  <main class="chat-main">
+  <main class="chat-main" id="chatMain">
     <div id="chatPlaceholder" class="chat-placeholder">
       <div class="placeholder-icon">💬</div>
       <h2>Добро пожаловать!</h2>
-      <p>Выберите комнату слева или создайте новую.</p>
+      <p>Выберите чат слева или создайте новую комнату.</p>
     </div>
 
     <div id="activeChat" class="active-chat" style="display:none;">
       <header class="chat-header">
-        <div class="chat-header-name"><span class="hash">#</span> <span id="headerRoomName"></span></div>
+        <div class="chat-header-name"><span class="hash" id="headerHash">#</span> <span id="headerRoomName"></span></div>
       </header>
 
       <div class="messages" id="messages"></div>
@@ -88,12 +90,11 @@
         <button class="reply-close" onclick="cancelReply()">✕</button>
       </div>
 
-      <!-- Индикатор действий -->
       <div class="typing-indicator" id="actionIndicator"></div>
       
+      <!-- Поле ввода в стиле Telegram -->
       <div class="input-bar">
-        <button id="micBtn" class="btn-mic" title="Голосовое" onclick="toggleRecording()">🎤</button>
-        <label class="btn-attach" title="Отправить фото">
+        <label class="btn-attach" title="Фото">
           📎
           <input type="file" id="imageInput" accept="image/*" style="display:none;" onchange="uploadFile(this)">
         </label>
@@ -101,8 +102,13 @@
         <div class="input-wrap">
           <input type="text" id="msgInput" placeholder="Сообщение..." maxlength="1000">
         </div>
+        
+        <button id="micBtn" class="btn-mic" title="Голосовое" onclick="toggleRecording()">
+          🎤
+        </button>
+        
         <button onclick="sendMessage()" class="btn-send" title="Отправить">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
         </button>
       </div>
     </div>
@@ -114,7 +120,12 @@
   <div class="modal-box">
     <h2>Создать комнату</h2>
     <div class="input-wrap">
+      <label>Название</label>
       <input type="text" id="newRoomInput" placeholder="Название комнаты" maxlength="30">
+    </div>
+    <div class="input-wrap">
+      <label>Пароль (необязательно)</label>
+      <input type="password" id="newRoomPassword" placeholder="Оставьте пустым для открытой">
     </div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="hideCreateRoom()">Отмена</button>
@@ -123,9 +134,22 @@
   </div>
 </div>
 
+<div id="passwordModal" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <h2>Введите пароль</h2>
+    <div class="input-wrap">
+      <input type="password" id="joinPasswordInput" placeholder="Пароль комнаты">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="hidePasswordModal()">Отмена</button>
+      <button class="btn-create" onclick="submitPassword()">Войти</button>
+    </div>
+  </div>
+</div>
+
 <div id="settingsModal" class="modal-overlay" style="display:none;">
   <div class="modal-box">
-    <h2>Настройки</h2>
+    <h2>Настройки профиля</h2>
     <div class="input-wrap">
       <label>Ник</label>
       <input type="text" id="settingsNick" maxlength="20">
@@ -144,10 +168,11 @@
 <div id="roomSettingsModal" class="modal-overlay" style="display:none;">
   <div class="modal-box">
     <h2>Настройки комнаты</h2>
-    <p>Вы можете удалить комнату, если вы её создатель.</p>
-    <div class="modal-actions">
-      <button class="btn-cancel" onclick="hideRoomSettings()">Закрыть</button>
+    <p>Удалять и очищать историю может только создатель.</p>
+    <div class="modal-actions" style="flex-direction: column; gap: 8px;">
+      <button class="btn-create" style="background:#f59e0b;" onclick="clearHistory()">Очистить историю</button>
       <button class="btn-create" style="background:#ef4444;" onclick="deleteRoom()">Удалить комнату</button>
+      <button class="btn-cancel" onclick="hideRoomSettings()">Закрыть</button>
     </div>
   </div>
 </div>
@@ -155,7 +180,6 @@
 <div id="inviteModal" class="modal-overlay" style="display:none;">
   <div class="modal-box">
     <h2>Добавить друга</h2>
-    <p>Введите ник пользователя, чтобы добавить его в друзья.</p>
     <div class="input-wrap">
       <input type="text" id="friendInput" placeholder="Ник друга" maxlength="20">
     </div>
@@ -166,10 +190,9 @@
   </div>
 </div>
 
-<!-- Модальное окно редактирования -->
 <div id="editModal" class="modal-overlay" style="display:none;">
   <div class="modal-box">
-    <h2>Редактировать сообщение</h2>
+    <h2>Редактировать</h2>
     <div class="input-wrap">
       <input type="text" id="editInput" maxlength="1000">
     </div>
@@ -186,15 +209,18 @@ let socket = null;
 let myName = '';
 let myColor = '#a855f7';
 let currentRoom = '';
+let currentChatType = 'room';
+let currentPeer = '';
 let mediaRecorder = null;
 let audioChunks = [];
 let replyToMsg = null;
 let messageQueue = [];
 let editingMsgId = null;
+let editingIsPrivate = false;
 let myFriends = [];
-let statusTimeout = null;
+let pendingRoomJoin = null;
+let isMobileMenuOpen = false;
 
-// --- Утилиты ---
 function getAvatarColor(name) {
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
@@ -202,7 +228,18 @@ function getAvatarColor(name) {
   return `hsl(${hue}, 60%, 50%)`;
 }
 
-// --- Автовход ---
+function initTheme() {
+  const theme = localStorage.getItem('chat_theme') || 'dark';
+  document.body.className = 'theme-' + theme;
+}
+function toggleTheme() {
+  const current = document.body.className.includes('theme-dark') ? 'dark' : 'light';
+  const next = current === 'dark' ? 'light' : 'dark';
+  document.body.className = 'theme-' + next;
+  localStorage.setItem('chat_theme', next);
+}
+initTheme();
+
 window.onload = () => {
   const savedName = localStorage.getItem('chat_username');
   const savedColor = localStorage.getItem('chat_color');
@@ -213,7 +250,6 @@ window.onload = () => {
   }
 };
 
-// --- Вход ---
 function login() {
   const nick = document.getElementById('nickInput').value.trim();
   const color = document.getElementById('colorInput').value;
@@ -224,13 +260,7 @@ function login() {
   localStorage.setItem('chat_username', myName);
   localStorage.setItem('chat_color', myColor);
 
-  socket = io({
-    transports: ['websocket', 'polling'],
-    reconnection: true,
-    reconnectionAttempts: Infinity,
-    reconnectionDelay: 500,
-    reconnectionDelayMax: 3000
-  });
+  socket = io({ transports: ['websocket', 'polling'], reconnection: true });
 
   socket.on('connect', () => {
     document.getElementById('loginScreen').style.display = 'none';
@@ -240,47 +270,67 @@ function login() {
     flushQueue();
   });
 
-  socket.on('disconnect', () => {
-    addSystemMessage("⚠️ Соединение потеряно. Восстанавливаем...");
-  });
+  socket.on('disconnect', () => addSystemMessage("⚠️ Соединение потеряно..."));
+  socket.on('roomError', (msg) => alert(msg));
 
-  // --- Список комнат ---
   socket.on('roomList', (list) => {
     const container = document.getElementById('roomListContainer');
     container.innerHTML = '';
     list.forEach(room => {
       const div = document.createElement('div');
       div.className = 'server-item';
-      if (room.name === currentRoom) div.classList.add('active');
-      div.title = room.name;
-      div.textContent = room.name.charAt(0).toUpperCase();
-      div.onclick = () => enterRoom(room.name);
+      if (room.name === currentRoom && currentChatType === 'room') div.classList.add('active');
+      div.title = room.name + (room.hasPassword ? ' 🔒' : '');
+      div.innerHTML = room.hasPassword ? '🔒' : room.name.charAt(0).toUpperCase();
+      div.onclick = () => {
+        if (room.hasPassword && room.name !== currentRoom) {
+          pendingRoomJoin = room.name;
+          document.getElementById('passwordModal').style.display = 'flex';
+        } else {
+          enterRoom(room.name, null);
+        }
+        if (window.innerWidth <= 700) toggleMobileMenu();
+      };
       container.appendChild(div);
     });
   });
 
-  // --- История ---
-  socket.on('history', (messages) => {
+  socket.on('history', (data) => {
     document.getElementById('chatPlaceholder').style.display = 'none';
     document.getElementById('activeChat').style.display = 'flex';
-    document.getElementById('headerRoomName').textContent = currentRoom;
-    document.getElementById('currentRoomName').textContent = currentRoom;
+    
+    if (data.type === 'private') {
+      currentChatType = 'private';
+      currentPeer = data.peer;
+      document.getElementById('headerRoomName').textContent = `ЛС: ${data.peer}`;
+      document.getElementById('headerHash').textContent = '@';
+      document.getElementById('currentRoomName').textContent = `ЛС: ${data.peer}`;
+    } else {
+      currentChatType = 'room';
+      document.getElementById('headerRoomName').textContent = currentRoom;
+      document.getElementById('headerHash').textContent = '#';
+      document.getElementById('currentRoomName').textContent = currentRoom;
+    }
+
     const box = document.getElementById('messages');
     box.innerHTML = '';
-    messages.forEach(msg => renderMessage(msg, true));
+    data.history.forEach(msg => renderMessage(msg, true));
     scrollToBottom();
+    updateOnlineListVisibility();
   });
 
-  // --- Новое сообщение ---
   socket.on('message', (msg) => { 
-    renderMessage(msg); 
-    scrollToBottom(); 
-    if (document.hidden && Notification.permission === 'granted') {
-      new Notification(`#${currentRoom}`, { body: `${msg.username}: ${msg.text || 'Вложение'}` });
-    }
+    renderMessage(msg); scrollToBottom(); 
+    if (document.hidden && Notification.permission === 'granted') new Notification(`#${currentRoom}`, { body: `${msg.username}: ${msg.text || 'Вложение'}` });
   });
 
-  // --- Редактирование ---
+  socket.on('privateMessage', ({ msg }) => {
+    if (currentChatType === 'private' && (msg.username === currentPeer || msg.username === myName)) {
+      renderMessage(msg); scrollToBottom();
+    }
+    if (document.hidden && Notification.permission === 'granted') new Notification(`ЛС от ${msg.username}`, { body: msg.text || 'Вложение' });
+  });
+
   socket.on('messageEdited', ({ msgId, newText }) => {
     const textEl = document.getElementById(`text-${msgId}`);
     if (textEl) {
@@ -289,7 +339,7 @@ function login() {
       if (bubble && !bubble.querySelector('.edited-mark')) {
         const mark = document.createElement('span');
         mark.className = 'edited-mark';
-        mark.textContent = ' (изменено)';
+        mark.textContent = ' (изм.)';
         bubble.appendChild(mark);
       }
     }
@@ -300,18 +350,16 @@ function login() {
     if (el) el.remove();
   });
 
-  socket.on('roomDeleted', () => {
-    alert('Эта комната была удалена.');
-    location.reload();
+  socket.on('historyCleared', () => {
+    document.getElementById('messages').innerHTML = '';
+    addSystemMessage("История очищена.");
   });
+
+  socket.on('roomDeleted', () => { alert('Комната удалена.'); location.reload(); });
 
   socket.on('messageDelivered', ({ id }) => {
     const statusEl = document.getElementById(`status-${id}`);
-    if (statusEl) {
-      statusEl.textContent = '✔️';
-      statusEl.style.color = '#22c55e';
-      messageQueue = messageQueue.filter(m => m.tempId !== id);
-    }
+    if (statusEl) { statusEl.textContent = '✔️'; statusEl.style.color = '#22c55e'; messageQueue = messageQueue.filter(m => m.tempId !== id); }
   });
 
   socket.on('updateReactions', ({ messageId, reactions }) => {
@@ -335,7 +383,6 @@ function login() {
     });
   });
 
-  // --- Статусы (печатает / записывает) ---
   socket.on('userStatus', ({ username, type }) => {
     const el = document.getElementById('actionIndicator');
     if (type === 'typing') el.textContent = `${username} печатает...`;
@@ -343,14 +390,17 @@ function login() {
     else el.textContent = '';
   });
 
-  // --- Друзья ---
   socket.on('friendsList', (friends) => {
     myFriends = friends || [];
     renderFriends();
   });
 }
 
-// --- UI профиля ---
+function updateOnlineListVisibility() {
+  const section = document.getElementById('onlineSection');
+  if (section) section.style.display = (currentChatType === 'room') ? 'block' : 'none';
+}
+
 function updateProfileUI() {
   document.getElementById('myName').textContent = myName;
   const myAv = document.getElementById('myAvatar');
@@ -362,62 +412,58 @@ function renderFriends() {
   const list = document.getElementById('friendsList');
   list.innerHTML = '';
   if (myFriends.length === 0) {
-    list.innerHTML = '<li style="color:var(--text-muted); font-size:12px; padding:4px 8px;">Пока никого нет</li>';
+    list.innerHTML = '<li style="color:var(--text-muted); font-size:12px; padding:4px 8px;">Нет друзей</li>';
     return;
   }
   myFriends.forEach(f => {
     const li = document.createElement('li');
     li.className = 'user-list-item';
+    li.style.cursor = 'pointer';
     li.innerHTML = `
       <div class="user-list-avatar" style="background:${getAvatarColor(f)}">${f.slice(0,2).toUpperCase()}</div>
       <span class="user-list-name">${f}</span>
-      <span class="status-dot" style="background:${getAvatarColor(f)}"></span>
     `;
+    li.onclick = () => {
+      socket.emit('openPrivate', f);
+      if (window.innerWidth <= 700) toggleMobileMenu();
+    };
     list.appendChild(li);
   });
 }
 
-// --- Выход ---
-function logout() {
-  localStorage.removeItem('chat_username');
-  if (socket) socket.disconnect();
-  location.reload();
+function logout() { localStorage.removeItem('chat_username'); if (socket) socket.disconnect(); location.reload(); }
+
+function toggleMobileMenu() {
+  const sidebar = document.getElementById('channelSidebar');
+  const serverList = document.getElementById('serverList');
+  isMobileMenuOpen = !isMobileMenuOpen;
+  if (isMobileMenuOpen) {
+    sidebar.classList.add('mobile-open');
+    serverList.classList.add('mobile-open');
+  } else {
+    sidebar.classList.remove('mobile-open');
+    serverList.classList.remove('mobile-open');
+  }
 }
 
-// --- Настройки ---
-function showSettings() {
-  document.getElementById('settingsNick').value = myName;
-  document.getElementById('settingsColor').value = myColor;
-  document.getElementById('settingsModal').style.display = 'flex';
-}
-function hideSettings() { document.getElementById('settingsModal').style.display = 'none'; }
-function saveSettings() {
-  const newName = document.getElementById('settingsNick').value.trim();
-  const newColor = document.getElementById('settingsColor').value;
-  if (!newName) return;
-  myName = newName;
-  myColor = newColor;
-  localStorage.setItem('chat_username', myName);
-  localStorage.setItem('chat_color', myColor);
-  updateProfileUI();
-  hideSettings();
-  socket.emit('auth', { username: myName, avatarColor: myColor }); // Обновляем на сервере
-  if (currentRoom) enterRoom(currentRoom);
-}
-
-// --- Комнаты ---
 function showCreateRoom() { document.getElementById('createRoomModal').style.display = 'flex'; document.getElementById('newRoomInput').focus(); }
 function hideCreateRoom() { document.getElementById('createRoomModal').style.display = 'none'; }
 function createRoom() {
   const name = document.getElementById('newRoomInput').value.trim();
+  const password = document.getElementById('newRoomPassword').value.trim();
   if (!name) return;
+  socket.emit('createRoom', { name, password });
   hideCreateRoom();
-  enterRoom(name);
+  document.getElementById('newRoomInput').value = '';
+  document.getElementById('newRoomPassword').value = '';
+  setTimeout(() => enterRoom(name, password), 500);
 }
-function enterRoom(roomName) {
+function enterRoom(roomName, password) {
   currentRoom = roomName;
-  socket.emit('joinRoom', { roomName });
+  currentChatType = 'room';
+  socket.emit('joinRoom', { roomName, password });
 }
+
 function showRoomSettings() { if (currentRoom) document.getElementById('roomSettingsModal').style.display = 'flex'; }
 function hideRoomSettings() { document.getElementById('roomSettingsModal').style.display = 'none'; }
 function deleteRoom() {
@@ -426,20 +472,23 @@ function deleteRoom() {
     hideRoomSettings();
   }
 }
+function clearHistory() {
+  if (confirm('Очистить историю?')) {
+    socket.emit('clearHistory', currentRoom);
+    hideRoomSettings();
+  }
+}
 
-// --- Друзья ---
 function showInviteModal() { document.getElementById('inviteModal').style.display = 'flex'; document.getElementById('friendInput').focus(); }
 function hideInviteModal() { document.getElementById('inviteModal').style.display = 'none'; }
 function addFriend() {
   const friendName = document.getElementById('friendInput').value.trim();
   if (!friendName || friendName === myName) return;
-  if (!myFriends.includes(friendName)) myFriends.push(friendName);
-  socket.emit('addFriend', friendName); // Отправляем на сервер (для сохранения)
+  socket.emit('addFriend', friendName);
   hideInviteModal();
-  renderFriends();
+  document.getElementById('friendInput').value = '';
 }
 
-// --- Отправка ---
 function sendMessage() {
   const input = document.getElementById('msgInput');
   const text = input.value.trim();
@@ -452,11 +501,14 @@ function sendMessage() {
   input.value = '';
   cancelReply();
   
-  // Мгновенно отправляем, не ждём
   if (socket && socket.connected) {
-    socket.emit('message', msgData);
+    if (currentChatType === 'private') {
+      socket.emit('sendPrivate', { to: currentPeer, ...msgData });
+    } else {
+      socket.emit('message', msgData);
+    }
   } else {
-    messageQueue.push(msgData);
+    messageQueue.push({ ...msgData, chatType: currentChatType, peer: currentPeer });
     const statusEl = document.getElementById(`status-${tempId}`);
     if (statusEl) { statusEl.textContent = '⚠️'; statusEl.style.color = '#ef4444'; }
   }
@@ -465,12 +517,14 @@ function sendMessage() {
 
 function flushQueue() {
   if (messageQueue.length > 0 && socket.connected) {
-    messageQueue.forEach(msg => socket.emit('message', msg));
+    messageQueue.forEach(msg => {
+      if (msg.chatType === 'private') socket.emit('sendPrivate', { to: msg.peer, ...msg });
+      else socket.emit('message', msg);
+    });
     messageQueue = [];
   }
 }
 
-// --- Файлы ---
 async function uploadFile(inputEl) {
   const file = inputEl.files[0];
   if (!file) return;
@@ -479,12 +533,17 @@ async function uploadFile(inputEl) {
   try {
     const response = await fetch('/upload', { method: 'POST', body: formData });
     const data = await response.json();
-    if (data.url) socket.emit('message', { mediaUrl: data.url, mediaType: data.type, tempId: 'temp-file-' + Date.now() });
+    if (data.url) {
+      if (currentChatType === 'private') {
+        socket.emit('sendPrivate', { to: currentPeer, mediaUrl: data.url, mediaType: data.type, tempId: 'temp-file-' + Date.now() });
+      } else {
+        socket.emit('message', { mediaUrl: data.url, mediaType: data.type, tempId: 'temp-file-' + Date.now() });
+      }
+    }
   } catch (err) { alert('Ошибка: ' + err.message); }
   inputEl.value = '';
 }
 
-// --- Запись ---
 async function toggleRecording() {
   const micBtn = document.getElementById('micBtn');
   if (mediaRecorder && mediaRecorder.state === 'recording') {
@@ -510,7 +569,10 @@ async function toggleRecording() {
       try {
         const response = await fetch('/upload', { method: 'POST', body: formData });
         const data = await response.json();
-        if (data.url) socket.emit('message', { mediaUrl: data.url, mediaType: 'audio', tempId: 'temp-audio-' + Date.now() });
+        if (data.url) {
+          if (currentChatType === 'private') socket.emit('sendPrivate', { to: currentPeer, mediaUrl: data.url, mediaType: 'audio', tempId: 'temp-audio-' + Date.now() });
+          else socket.emit('message', { mediaUrl: data.url, mediaType: 'audio', tempId: 'temp-audio-' + Date.now() });
+        }
       } catch (err) { alert('Ошибка: ' + err.message); }
       stream.getTracks().forEach(t => t.stop());
     };
@@ -518,11 +580,10 @@ async function toggleRecording() {
     mediaRecorder.start();
     micBtn.classList.add('recording');
     micBtn.textContent = '⏹';
-    socket.emit('status', { type: 'recording' }); // Сообщаем всем, что записываем
+    socket.emit('status', { type: 'recording' });
   } catch (err) { alert('Нет доступа: ' + err.message); }
 }
 
-// --- Ответы ---
 function setReply(msg) {
   replyToMsg = msg;
   document.getElementById('replyBlock').style.display = 'flex';
@@ -534,9 +595,28 @@ function cancelReply() {
   document.getElementById('replyBlock').style.display = 'none';
 }
 
-// --- Редактирование ---
-function openEdit(msg) {
+function showSettings() {
+  document.getElementById('settingsNick').value = myName;
+  document.getElementById('settingsColor').value = myColor;
+  document.getElementById('settingsModal').style.display = 'flex';
+}
+function hideSettings() { document.getElementById('settingsModal').style.display = 'none'; }
+function saveSettings() {
+  const newName = document.getElementById('settingsNick').value.trim();
+  const newColor = document.getElementById('settingsColor').value;
+  if (!newName) return;
+  myName = newName;
+  myColor = newColor;
+  localStorage.setItem('chat_username', myName);
+  localStorage.setItem('chat_color', myColor);
+  updateProfileUI();
+  hideSettings();
+  socket.emit('auth', { username: myName, avatarColor: myColor });
+}
+
+function openEdit(msg, isPrivate) {
   editingMsgId = msg.id;
+  editingIsPrivate = isPrivate;
   document.getElementById('editInput').value = msg.text;
   document.getElementById('editModal').style.display = 'flex';
   document.getElementById('editInput').focus();
@@ -544,34 +624,34 @@ function openEdit(msg) {
 function hideEdit() { document.getElementById('editModal').style.display = 'none'; editingMsgId = null; }
 function saveEdit() {
   const newText = document.getElementById('editInput').value.trim();
-  if (newText && editingMsgId) socket.emit('editMessage', { msgId: editingMsgId, newText });
+  if (newText && editingMsgId) socket.emit('editMessage', { msgId: editingMsgId, newText, isPrivate: editingIsPrivate });
   hideEdit();
 }
 
-// --- Уведомления ---
+function deleteMsg(msgId, isPrivate) {
+  if (confirm('Удалить сообщение?')) socket.emit('deleteMessage', { msgId, isPrivate });
+}
+
 function requestNotifications() {
   if (!("Notification" in window)) return alert("Нет поддержки");
   Notification.requestPermission().then(p => { if (p === "granted") alert("Включено!"); });
 }
 
-// --- Глобальные слушатели ---
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('nickInput').addEventListener('keypress', e => { if (e.key === 'Enter') login(); });
-  document.getElementById('newRoomInput').addEventListener('keypress', e => { if (e.key === 'Enter') createRoom(); });
   document.getElementById('msgInput').addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(); });
   document.getElementById('friendInput').addEventListener('keypress', e => { if (e.key === 'Enter') addFriend(); });
   document.getElementById('editInput').addEventListener('keypress', e => { if (e.key === 'Enter') saveEdit(); });
+  document.getElementById('joinPasswordInput').addEventListener('keypress', e => { if (e.key === 'Enter') submitPassword(); });
 
-  // Статус "печатает" при вводе
   document.getElementById('msgInput').addEventListener('input', () => {
     if (!socket) return;
     socket.emit('status', { type: 'typing' });
-    clearTimeout(statusTimeout);
-    statusTimeout = setTimeout(() => socket.emit('status', { type: 'idle' }), 1500);
+    clearTimeout(window.typingTimeout);
+    window.typingTimeout = setTimeout(() => socket.emit('status', { type: 'idle' }), 1500);
   });
 });
 
-// --- Рендер ---
 let lastAuthor = null;
 
 function renderMessage(msg, isHistory = false) {
@@ -594,6 +674,7 @@ function renderMessage(msg, isHistory = false) {
   let contentHTML = '';
   if (msg.replyTo) contentHTML += `<div class="reply-preview">↪ ${msg.replyTo.username}: ${msg.replyTo.text || 'Вложение'}</div>`;
   if (msg.text) contentHTML += `<div class="bubble-text" id="text-${msg.id}"></div>`;
+  
   if (msg.mediaType === 'image') contentHTML += `<div class="bubble-media"><img src="${msg.mediaUrl}" loading="lazy" onclick="window.open(this.src)"></div>`;
   else if (msg.mediaType === 'audio') {
     contentHTML += `
@@ -609,7 +690,6 @@ function renderMessage(msg, isHistory = false) {
   }
 
   wrapper.innerHTML = `
-    <div class="msg-avatar" style="background:${msg.avatarColor || getAvatarColor(msg.username)}">${msg.username.slice(0,2).toUpperCase()}</div>
     <div class="bubble-container">
       ${!isSameAuthor ? `<div class="bubble-author">${isMine ? 'Вы' : msg.username} <span class="bubble-time">${new Date(msg.time).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'})}</span></div>` : ''}
       <div class="bubble-content-wrapper">
@@ -620,8 +700,8 @@ function renderMessage(msg, isHistory = false) {
       <div class="msg-actions">
         <button title="Ответить" onclick='setReply(${JSON.stringify(msg).replace(/'/g, "&#39;")})'>↪</button>
         <button title="Реакция" onclick='addReaction("${msg.id}", "❤️")'>❤️</button>
-        ${isMine && msg.text ? `<button title="Редактировать" onclick='openEdit(${JSON.stringify(msg).replace(/'/g, "&#39;")})'>✏️</button>` : ''}
-        ${isMine ? `<button title="Удалить" onclick='deleteMsg("${msg.id}")'>🗑️</button>` : ''}
+        ${isMine && msg.text ? `<button title="Редактировать" onclick='openEdit(${JSON.stringify(msg).replace(/'/g, "&#39;")}, ${currentChatType === 'private'})'>✏️</button>` : ''}
+        ${isMine ? `<button title="Удалить" onclick='deleteMsg("${msg.id}", ${currentChatType === 'private'})'>🗑️</button>` : ''}
       </div>
     </div>
   `;
@@ -643,11 +723,7 @@ function renderMessage(msg, isHistory = false) {
 
 function addReaction(msgId, emoji) {
   if (!msgId || msgId.startsWith('temp-')) return;
-  socket.emit('react', { messageId: msgId, emoji });
-}
-
-function deleteMsg(msgId) {
-  if (confirm('Удалить сообщение?')) socket.emit('deleteMessage', msgId);
+  socket.emit('react', { messageId: msgId, emoji, isPrivate: currentChatType === 'private' });
 }
 
 function renderReactions(container, msgId, reactions) {
@@ -664,7 +740,6 @@ function renderReactions(container, msgId, reactions) {
   }
 }
 
-// --- Аудио плеер ---
 function toggleAudio(src, btn) {
   const audioId = btn.parentElement.id.replace('player-', 'audio-el-');
   const audio = document.getElementById(audioId);
@@ -711,6 +786,19 @@ function addSystemMessage(text) {
   div.textContent = text;
   box.appendChild(div);
   scrollToBottom();
+}
+
+function submitPassword() {
+  const password = document.getElementById('joinPasswordInput').value;
+  if (pendingRoomJoin) {
+    enterRoom(pendingRoomJoin, password);
+    hidePasswordModal();
+  }
+}
+function hidePasswordModal() {
+  document.getElementById('passwordModal').style.display = 'none';
+  document.getElementById('joinPasswordInput').value = '';
+  pendingRoomJoin = null;
 }
 </script>
 </body>
