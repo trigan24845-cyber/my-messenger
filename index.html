@@ -136,7 +136,15 @@ function joinChat() {
 function sendMessage() {
   const input = document.getElementById('msgInput');
   const text = input.value.trim();
-  if (!text || !socket) return;
+
+  // Проверка: если сокет не подключен, выводим предупреждение
+  if (!socket || !socket.connected) {
+    alert("Соединение с сервером потеряно. Пожалуйста, обновите страницу (F5).");
+    return;
+  }
+  
+  if (!text) return;
+  
   socket.emit('message', text);
   input.value = '';
   socket.emit('typing', false);
