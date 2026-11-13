@@ -7,13 +7,13 @@ const multer = require('multer');
 
 const app = express();
 const server = http.createServer(app);
-
 const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST"] },
   transports: ['polling', 'websocket'] 
 });
 
 const PORT = process.env.PORT || 3000;
+const HISTORY_FILE = path.join(__dirname, 'history.json');
 
 // --- Настройка папки для голосовых ---
 const uploadDir = path.join(__dirname, 'uploads');
@@ -38,12 +38,36 @@ app.post('/upload', upload.single('audio'), (req, res) => {
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
-// --- Логика Комнат ---
-const rooms = new Map();
+// --- Работа с историей ---
+let rooms = new Map();
 
-// Создаем комнату по умолчанию, чтобы не было пусто при первом запуске
+// Загрузка истории из файла (если есть)
+if (fs.existsSync(HISTORY_FILE)) {
+  try {
+    const data = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
+    for (const [roomName, roomData] of Object.entries(data)) {
+      rooms.set(roomName, {
+        users: new Map(),
+        history: roomData.history || []
+      });
+    }
+  } catch (e) {
+    console.error("Ошибка чтения истории:", e);
+  }
+}
+
 if (!rooms.has('Общий чат')) {
-    rooms.set('Общий чат', { users: new Map(), history: [] });
+  rooms.set('Общий чат', { users: new Map(), history: [] });
+}
+
+function saveHistory() {
+  const data = {};
+  for (const [roomName, roomData] of rooms.entries()) {
+    data[roomName] = { history: roomData.history };
+  }
+  fs.writeFile(HISTORY_FILE, JSON.stringify(data, null, 2), (err) => {
+    if (err) console.error("Ошибка сохранения истории:", err);
+  });
 }
 
 function broadcastRooms() {
@@ -60,7 +84,6 @@ io.on('connection', (socket) => {
   socket.on('joinRoom', ({ username, roomName }) => {
     if (!username || !roomName) return;
     
-    // Если уже были в другой комнате, выходим из нее
     if (socket.roomName && rooms.has(socket.roomName)) {
       const oldRoom = rooms.get(socket.roomName);
       oldRoom.users.delete(socket.id);
@@ -87,23 +110,53 @@ io.on('connection', (socket) => {
     broadcastRooms();
   });
 
+  // Обработка нового сообщения (с подтверждением)
   socket.on('message', (data) => {
     if (!socket.username || !socket.roomName) return;
     const room = rooms.get(socket.roomName);
     if (!room) return;
 
     const msg = {
+      id: Date.now() + Math.random().toString(36).substr(2, 9), // Уникальный ID
       type: 'user',
       username: socket.username,
       text: data.text || '',
       audioUrl: data.audioUrl || null,
-      time: Date.now()
+      replyTo: data.replyTo || null,
+      time: Date.now(),
+      reactions: {} // { "❤️": ["User1", "User2"] }
     };
     
     room.history.push(msg);
-    if (room.history.length > 200) room.history.shift();
+    if (room.history.length > 300) room.history.shift(); // Храним 300 последних
+    saveHistory();
     
+    // Отправляем всем в комнате, и отдельно подтверждаем отправителю
     io.to(socket.roomName).emit('message', msg);
+    socket.emit('messageDelivered', { id: data.tempId });
+  });
+
+  // Обработка реакций
+  socket.on('react', ({ messageId, emoji }) => {
+    if (!socket.roomName) return;
+    const room = rooms.get(socket.roomName);
+    if (!room) return;
+
+    const msg = room.history.find(m => m.id === messageId);
+    if (!msg) return;
+
+    if (!msg.reactions[emoji]) msg.reactions[emoji] = [];
+    
+    const index = msg.reactions[emoji].indexOf(socket.username);
+    if (index > -1) {
+      msg.reactions[emoji].splice(index, 1); // Убираем реакцию
+      if (msg.reactions[emoji].length === 0) delete msg.reactions[emoji];
+    } else {
+      msg.reactions[emoji].push(socket.username); // Добавляем реакцию
+    }
+
+    saveHistory();
+    io.to(socket.roomName).emit('updateReactions', { messageId, reactions: msg.reactions });
   });
 
   socket.on('typing', (isTyping) => {
