@@ -87,11 +87,12 @@ function joinChat() {
 
   err.textContent = '';
   socket = io({
-  reconnection: true,
-  reconnectionAttempts: Infinity,
-  reconnectionDelay: 1000,
-  reconnectionDelayMax: 5000,
-});
+    transports: ['polling'],
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000
+  });
 
   socket.on('connect', () => socket.emit('join', nick));
 
