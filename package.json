@@ -1,7 +1,7 @@
 {
-  "name": "mini-messenger",
-  "version": "1.0.0",
-  "description": "Маленький мессенджер для друзей",
+  "name": "glass-chat",
+  "version": "2.0.0",
+  "description": "Продвинутый мессенджер",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
