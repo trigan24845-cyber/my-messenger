@@ -56,8 +56,11 @@ io.on('connection', (socket) => {
   socket.on('join', (username) => {
     username = String(username || '').trim().slice(0, 20);
     if (!username) return;
+    
+    // Сохраняем ник ровно таким, каким его ввели
     onlineUsers.set(socket.id, username);
     socket.username = username;
+    
     socket.emit('history', history);
     io.emit('online', [...onlineUsers.values()]);
     io.emit('message', { type: 'system', text: `${username} присоединился`, time: Date.now() });
