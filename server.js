@@ -16,9 +16,7 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3000;
 const HISTORY_FILE = path.join(__dirname, 'history.json');
-const USERS_FILE = path.join(__dirname, 'users.json');
 
-// --- Папка файлов ---
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
@@ -42,12 +40,10 @@ app.post('/upload', upload.single('file'), (req, res) => {
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
-// --- База ---
 let rooms = new Map();
 let users = new Map();
 let privateChats = new Map();
 
-// Загрузка данных
 if (fs.existsSync(HISTORY_FILE)) {
   try {
     const data = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
@@ -73,15 +69,11 @@ function saveData() {
 
 function broadcastRooms() {
   const list = [];
-  rooms.forEach((r, name) => {
-    list.push({ name, count: r.users.size, hasPassword: !!r.password });
-  });
+  rooms.forEach((r, name) => list.push({ name, count: r.users.size, hasPassword: !!r.password }));
   io.emit('roomList', list);
 }
 
-function getPrivateChatKey(u1, u2) {
-  return [u1, u2].sort().join('|');
-}
+function getPrivateChatKey(u1, u2) { return [u1, u2].sort().join('|'); }
 
 io.on('connection', (socket) => {
   broadcastRooms();
@@ -96,16 +88,13 @@ io.on('connection', (socket) => {
     broadcastRooms();
   });
 
-  // --- Комнаты ---
   socket.on('joinRoom', ({ roomName, password }) => {
     if (!socket.username || !rooms.has(roomName)) return;
     const room = rooms.get(roomName);
-    
     if (room.password && room.password !== password && room.creator !== socket.username) {
       socket.emit('roomError', 'Неверный пароль');
       return;
     }
-
     if (socket.roomName && rooms.has(socket.roomName)) {
       const old = rooms.get(socket.roomName);
       old.users.delete(socket.id);
@@ -113,11 +102,9 @@ io.on('connection', (socket) => {
       io.to(socket.roomName).emit('roomUsers', [...old.users.values()]);
       broadcastRooms();
     }
-
     socket.roomName = roomName;
     room.users.set(socket.id, { username: socket.username, avatarColor: socket.avatarColor });
     socket.join(roomName);
-
     socket.emit('history', { type: 'room', history: room.history });
     io.to(roomName).emit('roomUsers', [...room.users.values()]);
     io.to(roomName).emit('message', { type: 'system', text: `${socket.username} присоединился`, time: Date.now() });
@@ -147,7 +134,6 @@ io.on('connection', (socket) => {
     io.to(roomName).emit('historyCleared');
   });
 
-  // --- Личные сообщения ---
   socket.on('openPrivate', (friendName) => {
     if (!socket.username) return;
     const key = getPrivateChatKey(socket.username, friendName);
@@ -162,102 +148,45 @@ io.on('connection', (socket) => {
     const key = getPrivateChatKey(socket.username, to);
     if (!privateChats.has(key)) privateChats.set(key, { history: [] });
     const chat = privateChats.get(key);
-    
-    const msg = {
-      id: Date.now() + Math.random().toString(36).substr(2, 9),
-      username: socket.username,
-      avatarColor: socket.avatarColor,
-      text: text || '',
-      mediaUrl, mediaType, replyTo,
-      time: Date.now(),
-      reactions: {},
-      edited: false
-    };
+    const msg = { id: Date.now() + Math.random().toString(36).substr(2, 9), username: socket.username, avatarColor: socket.avatarColor, text: text || '', mediaUrl, mediaType, replyTo, time: Date.now(), reactions: {}, edited: false };
     chat.history.push(msg);
     saveData();
-    
-    io.to(key).emit('privateMessage', { msg, to: to, from: socket.username });
+    io.to(key).emit('privateMessage', { msg, to, from: socket.username });
     socket.emit('messageDelivered', { id: tempId });
   });
 
-  // --- Общие сообщения ---
   socket.on('message', (data) => {
     if (!socket.username || !socket.roomName) return;
     const room = rooms.get(socket.roomName);
     if (!room) return;
-
-    const msg = {
-      id: Date.now() + Math.random().toString(36).substr(2, 9),
-      type: 'user',
-      username: socket.username,
-      avatarColor: socket.avatarColor,
-      text: data.text || '',
-      mediaUrl: data.mediaUrl || null,
-      mediaType: data.mediaType || null,
-      replyTo: data.replyTo || null,
-      time: Date.now(),
-      reactions: {},
-      edited: false
-    };
-    
+    const msg = { id: Date.now() + Math.random().toString(36).substr(2, 9), type: 'user', username: socket.username, avatarColor: socket.avatarColor, text: data.text || '', mediaUrl: data.mediaUrl || null, mediaType: data.mediaType || null, replyTo: data.replyTo || null, time: Date.now(), reactions: {}, edited: false };
     room.history.push(msg);
     if (room.history.length > 300) room.history.shift();
     saveData();
-    
     io.to(socket.roomName).emit('message', msg);
     socket.emit('messageDelivered', { id: data.tempId });
   });
 
-  // --- Редактирование, удаление, реакции ---
   socket.on('editMessage', ({ msgId, newText, isPrivate }) => {
     let history, target;
-    if (isPrivate) {
-      if (!socket.currentPrivate) return;
-      history = privateChats.get(socket.currentPrivate).history;
-      target = socket.currentPrivate;
-    } else {
-      if (!socket.roomName) return;
-      history = rooms.get(socket.roomName).history;
-      target = socket.roomName;
-    }
+    if (isPrivate) { if (!socket.currentPrivate) return; history = privateChats.get(socket.currentPrivate).history; target = socket.currentPrivate; }
+    else { if (!socket.roomName) return; history = rooms.get(socket.roomName).history; target = socket.roomName; }
     const msg = history.find(m => m.id === msgId);
-    if (msg && msg.username === socket.username) {
-      msg.text = newText; msg.edited = true;
-      saveData();
-      io.to(target).emit('messageEdited', { msgId, newText });
-    }
+    if (msg && msg.username === socket.username) { msg.text = newText; msg.edited = true; saveData(); io.to(target).emit('messageEdited', { msgId, newText }); }
   });
 
   socket.on('deleteMessage', ({ msgId, isPrivate }) => {
     let history, target;
-    if (isPrivate) {
-      if (!socket.currentPrivate) return;
-      history = privateChats.get(socket.currentPrivate).history;
-      target = socket.currentPrivate;
-    } else {
-      if (!socket.roomName) return;
-      history = rooms.get(socket.roomName).history;
-      target = socket.roomName;
-    }
+    if (isPrivate) { if (!socket.currentPrivate) return; history = privateChats.get(socket.currentPrivate).history; target = socket.currentPrivate; }
+    else { if (!socket.roomName) return; history = rooms.get(socket.roomName).history; target = socket.roomName; }
     const idx = history.findIndex(m => m.id === msgId);
-    if (idx !== -1 && history[idx].username === socket.username) {
-      history.splice(idx, 1);
-      saveData();
-      io.to(target).emit('messageDeleted', msgId);
-    }
+    if (idx !== -1 && history[idx].username === socket.username) { history.splice(idx, 1); saveData(); io.to(target).emit('messageDeleted', msgId); }
   });
 
   socket.on('react', ({ messageId, emoji, isPrivate }) => {
     let history, target;
-    if (isPrivate) {
-      if (!socket.currentPrivate) return;
-      history = privateChats.get(socket.currentPrivate).history;
-      target = socket.currentPrivate;
-    } else {
-      if (!socket.roomName) return;
-      history = rooms.get(socket.roomName).history;
-      target = socket.roomName;
-    }
+    if (isPrivate) { if (!socket.currentPrivate) return; history = privateChats.get(socket.currentPrivate).history; target = socket.currentPrivate; }
+    else { if (!socket.roomName) return; history = rooms.get(socket.roomName).history; target = socket.roomName; }
     const msg = history.find(m => m.id === messageId);
     if (!msg) return;
     if (!msg.reactions[emoji]) msg.reactions[emoji] = [];
@@ -268,7 +197,6 @@ io.on('connection', (socket) => {
     io.to(target).emit('updateReactions', { messageId, reactions: msg.reactions });
   });
 
-  // --- Друзья ---
   socket.on('addFriend', (friendName) => {
     if (!socket.username || !users.has(socket.username)) return;
     const user = users.get(socket.username);
@@ -280,7 +208,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // --- Статусы ---
   socket.on('status', ({ type }) => {
     if (!socket.username) return;
     if (socket.roomName) socket.to(socket.roomName).emit('userStatus', { username: socket.username, type });
