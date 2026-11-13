@@ -43,8 +43,8 @@ body::before {
   z-index: 0;
 }
 
-/* ---------- Экран входа ---------- */
-.login-screen {
+/* ---------- Экран входа и Лобби ---------- */
+.login-screen, .lobby-screen {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -117,7 +117,34 @@ body::before {
 
 .login-error { color: #ff453a; font-size: 13px; margin-top: 10px; min-height: 18px; }
 
-/* ============ ОСНОВНОЙ ЭКРАН ============ */
+/* --- Список комнат в Лобби --- */
+.room-list {
+  max-height: 250px;
+  overflow-y: auto;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+}
+
+.room-item {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border);
+  padding: 12px 16px;
+  border-radius: 12px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: background 0.2s, transform 0.1s;
+}
+.room-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
+}
+
+/* ============ ОСНОВНОЙ ЭКРАН (ЧАТ) ============ */
 .chat-screen {
   display: flex;
   width: 100vw;
@@ -227,7 +254,7 @@ header {
   z-index: 10;
 }
 
-.logo { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+.logo { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; color: var(--accent); }
 
 .user-info {
   display: flex; gap: 12px; align-items: center; font-size: 14px;
@@ -245,7 +272,7 @@ header {
   background: rgba(255, 69, 58, 0.15);
   color: #ff453a;
   border: 1px solid rgba(255, 69, 58, 0.3);
-  padding: 6px 14px;
+  padding: 8px 14px;
   border-radius: 8px;
   cursor: pointer;
   font-size: 13px;
@@ -430,7 +457,7 @@ header {
   100% { box-shadow: 0 0 0 0 rgba(255, 69, 58, 0); }
 }
 
-/* --- Аудиоплеер в сообщении --- */
+/* --- Аудиоплеер --- */
 .bubble-audio {
   margin-top: 4px;
   margin-bottom: 2px;
