@@ -39,10 +39,13 @@ app.post('/upload', upload.single('audio'), (req, res) => {
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 // --- Логика Комнат ---
-// Структура: rooms = { "Имя комнаты": { users: Map(socketId -> username), history: [] } }
 const rooms = new Map();
 
-// Функция для отправки списка комнат всем в лобби
+// Создаем комнату по умолчанию, чтобы не было пусто при первом запуске
+if (!rooms.has('Общий чат')) {
+    rooms.set('Общий чат', { users: new Map(), history: [] });
+}
+
 function broadcastRooms() {
   const roomList = [];
   rooms.forEach((room, name) => {
@@ -52,12 +55,20 @@ function broadcastRooms() {
 }
 
 io.on('connection', (socket) => {
-  // Отправляем список комнат при подключении
   broadcastRooms();
 
   socket.on('joinRoom', ({ username, roomName }) => {
     if (!username || !roomName) return;
     
+    // Если уже были в другой комнате, выходим из нее
+    if (socket.roomName && rooms.has(socket.roomName)) {
+      const oldRoom = rooms.get(socket.roomName);
+      oldRoom.users.delete(socket.id);
+      socket.leave(socket.roomName);
+      io.to(socket.roomName).emit('roomUsers', [...oldRoom.users.values()]);
+      broadcastRooms();
+    }
+
     socket.username = username;
     socket.roomName = roomName;
 
@@ -69,16 +80,10 @@ io.on('connection', (socket) => {
     room.users.set(socket.id, username);
     socket.join(roomName);
 
-    // Отправляем историю сообщений этой комнаты
     socket.emit('history', room.history);
-    
-    // Обновляем список пользователей в комнате
     io.to(roomName).emit('roomUsers', [...room.users.values()]);
-    
-    // Системное сообщение
     io.to(roomName).emit('message', { type: 'system', text: `${username} присоединился`, time: Date.now() });
     
-    // Обновляем общий список комнат (количество людей)
     broadcastRooms();
   });
 
@@ -98,7 +103,6 @@ io.on('connection', (socket) => {
     room.history.push(msg);
     if (room.history.length > 200) room.history.shift();
     
-    // Отправляем только в эту комнату
     io.to(socket.roomName).emit('message', msg);
   });
 
@@ -112,13 +116,8 @@ io.on('connection', (socket) => {
       const room = rooms.get(socket.roomName);
       if (room) {
         room.users.delete(socket.id);
-        
         io.to(socket.roomName).emit('roomUsers', [...room.users.values()]);
         io.to(socket.roomName).emit('message', { type: 'system', text: `${socket.username} покинул чат`, time: Date.now() });
-        
-        // Если комната пуста — можно удалить (по желанию)
-        // if (room.users.size === 0) rooms.delete(socket.roomName);
-        
         broadcastRooms();
       }
     }
