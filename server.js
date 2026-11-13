@@ -7,15 +7,19 @@ const multer = require('multer');
 
 const app = express();
 const server = http.createServer(app);
+// Принудительный websocket для скорости (с фолбэком на polling для нестабильных сетей)
 const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST"] },
-  transports: ['polling', 'websocket'] 
+  transports: ['websocket', 'polling'],
+  pingTimeout: 60000,
+  pingInterval: 25000
 });
 
 const PORT = process.env.PORT || 3000;
 const HISTORY_FILE = path.join(__dirname, 'history.json');
+const USERS_FILE = path.join(__dirname, 'users.json');
 
-// --- Настройка папки для файлов ---
+// --- Папка файлов ---
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
@@ -23,8 +27,7 @@ const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname) || '.webm';
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + ext);
+    cb(null, Date.now() + '-' + Math.round(Math.random() * 1E9) + ext);
   }
 });
 const upload = multer({ storage });
@@ -32,7 +35,6 @@ const upload = multer({ storage });
 app.use(express.static(__dirname));
 app.use('/uploads', express.static(uploadDir));
 
-// Загрузка любого файла (аудио или картинка)
 app.post('/upload', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Файл не загружен' });
   const type = req.file.mimetype.startsWith('image/') ? 'image' : 'audio';
@@ -41,78 +43,82 @@ app.post('/upload', upload.single('file'), (req, res) => {
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
-// --- База данных (в памяти + файл) ---
+// --- База (в памяти + файл) ---
 let rooms = new Map();
+let users = new Map(); // { username: { friends: [], avatarColor } }
 
 if (fs.existsSync(HISTORY_FILE)) {
   try {
     const data = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
     for (const [roomName, roomData] of Object.entries(data)) {
-      rooms.set(roomName, {
-        users: new Map(),
-        history: roomData.history || [],
-        creator: roomData.creator || null
-      });
+      rooms.set(roomName, { users: new Map(), history: roomData.history || [], creator: roomData.creator });
     }
-  } catch (e) { console.error("Ошибка чтения истории:", e); }
+  } catch (e) { console.error(e); }
+}
+if (fs.existsSync(USERS_FILE)) {
+  try {
+    const data = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+    users = new Map(Object.entries(data));
+  } catch (e) { console.error(e); }
 }
 
-if (!rooms.has('Общий чат')) {
-  rooms.set('Общий чат', { users: new Map(), history: [], creator: 'System' });
-}
+if (!rooms.has('Общий чат')) rooms.set('Общий чат', { users: new Map(), history: [], creator: 'System' });
 
-function saveHistory() {
-  const data = {};
-  for (const [roomName, roomData] of rooms.entries()) {
-    data[roomName] = { history: roomData.history, creator: roomData.creator };
-  }
-  fs.writeFile(HISTORY_FILE, JSON.stringify(data, null, 2), (err) => {
-    if (err) console.error("Ошибка сохранения:", err);
-  });
+function saveData() {
+  const roomData = {};
+  rooms.forEach((r, name) => { roomData[name] = { history: r.history, creator: r.creator }; });
+  fs.writeFile(HISTORY_FILE, JSON.stringify(roomData, null, 2), () => {});
+  fs.writeFile(USERS_FILE, JSON.stringify(Object.fromEntries(users), null, 2), () => {});
 }
 
 function broadcastRooms() {
-  const roomList = [];
-  rooms.forEach((room, name) => {
-    roomList.push({ name, count: room.users.size });
-  });
-  io.emit('roomList', roomList);
+  const list = [];
+  rooms.forEach((r, name) => list.push({ name, count: r.users.size }));
+  io.emit('roomList', list);
 }
 
 io.on('connection', (socket) => {
   broadcastRooms();
 
-  socket.on('joinRoom', ({ username, avatarColor, roomName }) => {
-    if (!username || !roomName) return;
+  // --- Вход/Авторизация ---
+  socket.on('auth', ({ username, avatarColor }) => {
+    socket.username = username;
+    socket.avatarColor = avatarColor;
+    if (!users.has(username)) users.set(username, { friends: [], avatarColor });
+    else users.get(username).avatarColor = avatarColor; // Обновляем цвет
+    saveData();
+    
+    // Отправляем список друзей и приглашений (пока просто заглушка для друзей)
+    socket.emit('friendsList', users.get(username).friends || []);
+    broadcastRooms();
+  });
+
+  // --- Комнаты ---
+  socket.on('joinRoom', ({ roomName }) => {
+    if (!socket.username) return;
     
     if (socket.roomName && rooms.has(socket.roomName)) {
-      const oldRoom = rooms.get(socket.roomName);
-      oldRoom.users.delete(socket.id);
+      const old = rooms.get(socket.roomName);
+      old.users.delete(socket.id);
       socket.leave(socket.roomName);
-      io.to(socket.roomName).emit('roomUsers', [...oldRoom.users.values()]);
+      io.to(socket.roomName).emit('roomUsers', [...old.users.values()]);
       broadcastRooms();
     }
 
-    socket.username = username;
-    socket.avatarColor = avatarColor;
     socket.roomName = roomName;
-
-    if (!rooms.has(roomName)) {
-      rooms.set(roomName, { users: new Map(), history: [], creator: username });
-    }
+    if (!rooms.has(roomName)) rooms.set(roomName, { users: new Map(), history: [], creator: socket.username });
 
     const room = rooms.get(roomName);
-    // Сохраняем объект пользователя, а не просто ник
-    room.users.set(socket.id, { username, avatarColor });
+    room.users.set(socket.id, { username: socket.username, avatarColor: socket.avatarColor });
     socket.join(roomName);
 
     socket.emit('history', room.history);
     io.to(roomName).emit('roomUsers', [...room.users.values()]);
-    io.to(roomName).emit('message', { type: 'system', text: `${username} присоединился`, time: Date.now() });
-    
+    io.to(roomName).emit('message', { type: 'system', text: `${socket.username} присоединился`, time: Date.now() });
     broadcastRooms();
   });
 
+  // --- Сообщения (с мгновенной доставкой) ---
   socket.on('message', (data) => {
     if (!socket.username || !socket.roomName) return;
     const room = rooms.get(socket.roomName);
@@ -125,75 +131,81 @@ io.on('connection', (socket) => {
       avatarColor: socket.avatarColor,
       text: data.text || '',
       mediaUrl: data.mediaUrl || null,
-      mediaType: data.mediaType || null, // 'image' | 'audio'
+      mediaType: data.mediaType || null,
       replyTo: data.replyTo || null,
       time: Date.now(),
-      reactions: {}
+      reactions: {},
+      edited: false
     };
     
     room.history.push(msg);
-    if (room.history.length > 500) room.history.shift();
-    saveHistory();
+    if (room.history.length > 300) room.history.shift();
+    saveData();
     
+    // Мгновенная рассылка всем в комнате
     io.to(socket.roomName).emit('message', msg);
     socket.emit('messageDelivered', { id: data.tempId });
   });
 
+  // --- Редактирование ---
+  socket.on('editMessage', ({ msgId, newText }) => {
+    if (!socket.roomName) return;
+    const room = rooms.get(socket.roomName);
+    if (!room) return;
+    const msg = room.history.find(m => m.id === msgId);
+    if (msg && msg.username === socket.username) {
+      msg.text = newText;
+      msg.edited = true;
+      saveData();
+      io.to(socket.roomName).emit('messageEdited', { msgId, newText, edited: true });
+    }
+  });
+
+  // --- Удаление ---
   socket.on('deleteMessage', (msgId) => {
     if (!socket.roomName) return;
     const room = rooms.get(socket.roomName);
     if (!room) return;
-
-    const msgIndex = room.history.findIndex(m => m.id === msgId);
-    if (msgIndex === -1) return;
-
-    const msg = room.history[msgIndex];
-    // Удалять может только автор
-    if (msg.username !== socket.username) return; 
-
-    room.history.splice(msgIndex, 1);
-    saveHistory();
-    io.to(socket.roomName).emit('messageDeleted', msgId);
+    const idx = room.history.findIndex(m => m.id === msgId);
+    if (idx !== -1 && room.history[idx].username === socket.username) {
+      room.history.splice(idx, 1);
+      saveData();
+      io.to(socket.roomName).emit('messageDeleted', msgId);
+    }
   });
 
   socket.on('deleteRoom', (roomName) => {
     if (!rooms.has(roomName)) return;
-    const room = rooms.get(roomName);
-    // Удалять может только создатель
-    if (room.creator !== socket.username) return;
-
-    // Выгоняем всех из комнаты
+    if (rooms.get(roomName).creator !== socket.username) return;
     io.to(roomName).emit('roomDeleted');
     rooms.delete(roomName);
-    saveHistory();
+    saveData();
     broadcastRooms();
   });
 
+  // --- Реакции ---
   socket.on('react', ({ messageId, emoji }) => {
     if (!socket.roomName) return;
     const room = rooms.get(socket.roomName);
     if (!room) return;
-
     const msg = room.history.find(m => m.id === messageId);
     if (!msg) return;
-
     if (!msg.reactions[emoji]) msg.reactions[emoji] = [];
-    
-    const index = msg.reactions[emoji].indexOf(socket.username);
-    if (index > -1) {
-      msg.reactions[emoji].splice(index, 1);
+    const i = msg.reactions[emoji].indexOf(socket.username);
+    if (i > -1) {
+      msg.reactions[emoji].splice(i, 1);
       if (msg.reactions[emoji].length === 0) delete msg.reactions[emoji];
     } else {
       msg.reactions[emoji].push(socket.username);
     }
-
-    saveHistory();
+    saveData();
     io.to(socket.roomName).emit('updateReactions', { messageId, reactions: msg.reactions });
   });
 
-  socket.on('typing', (isTyping) => {
+  // --- Статусы (печатает / записывает) ---
+  socket.on('status', ({ type }) => { // type: 'typing', 'recording', 'idle'
     if (!socket.username || !socket.roomName) return;
-    socket.to(socket.roomName).emit('typing', { username: socket.username, isTyping: !!isTyping });
+    socket.to(socket.roomName).emit('userStatus', { username: socket.username, type });
   });
 
   socket.on('disconnect', () => {
