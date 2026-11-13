@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Glass Chat</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -34,6 +34,7 @@
 <div id="appScreen" class="app-screen" style="display:none;">
   
   <button id="mobileMenuBtn" class="mobile-menu-btn" onclick="toggleMobileMenu()">☰</button>
+  <div id="mobileOverlay" class="mobile-overlay" onclick="closeMobileMenu()"></div>
 
   <aside class="server-list" id="serverList">
     <div class="server-item home active" title="Главная">🏠</div>
@@ -70,7 +71,7 @@
     </div>
   </aside>
 
-  <main class="chat-main" id="chatMain" onclick="closeMobileMenu()">
+  <main class="chat-main" id="chatMain">
     <div id="chatPlaceholder" class="chat-placeholder">
       <div class="placeholder-icon">💬</div>
       <h2>Добро пожаловать!</h2>
@@ -82,8 +83,11 @@
         <div class="chat-header-name"><span class="hash" id="headerHash">#</span> <span id="headerRoomName"></span></div>
       </header>
 
-      <div class="messages" id="messages"></div>
+      <div class="messages" id="messages" onscroll="handleScroll()"></div>
       
+      <!-- Кнопка "Вниз" -->
+      <button id="scrollDownBtn" class="scroll-down-btn" onclick="scrollToBottom(true)" style="display:none;">⬇</button>
+
       <div id="replyBlock" class="reply-block" style="display:none;">
         <div class="reply-content">
           <span class="reply-label">Ответ:</span>
@@ -94,7 +98,6 @@
 
       <div class="typing-indicator" id="actionIndicator"></div>
       
-      <!-- Эмодзи панель -->
       <div id="emojiPanel" class="emoji-panel" style="display:none;">
         <span onclick="addEmoji('😀')">😀</span><span onclick="addEmoji('😂')">😂</span><span onclick="addEmoji('🥰')">🥰</span><span onclick="addEmoji('😎')">😎</span><span onclick="addEmoji('😭')">😭</span>
         <span onclick="addEmoji('👍')">👍</span><span onclick="addEmoji('🔥')">🔥</span><span onclick="addEmoji('❤️')">❤️</span><span onclick="addEmoji('🎉')">🎉</span><span onclick="addEmoji('💩')">💩</span>
@@ -118,6 +121,11 @@
       </div>
     </div>
   </main>
+</div>
+
+<!-- Просмотр картинок -->
+<div id="imageViewer" class="image-viewer" style="display:none;" onclick="this.style.display='none'">
+  <img id="fullImage" src="" alt="Фото">
 </div>
 
 <!-- Модальные окна -->
@@ -192,8 +200,8 @@ let editingIsPrivate = false;
 let myFriends = [];
 let pendingRoomJoin = null;
 let isMobileMenuOpen = false;
+let lastMessageDate = null;
 
-// Утилиты
 function getAvatarColor(name) {
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
@@ -289,18 +297,23 @@ function login() {
 
     const box = document.getElementById('messages');
     box.innerHTML = '';
+    lastMessageDate = null;
     data.history.forEach(msg => renderMessage(msg, true));
     scrollToBottom();
     document.getElementById('onlineSection').style.display = (currentChatType === 'room') ? 'block' : 'none';
   });
 
   socket.on('message', (msg) => { 
-    renderMessage(msg); scrollToBottom(); playSound();
+    renderMessage(msg); 
+    if (isScrolledToBottom()) scrollToBottom(); else showScrollDownBtn();
+    playSound();
   });
 
   socket.on('privateMessage', ({ msg }) => {
     if (currentChatType === 'private' && (msg.username === currentPeer || msg.username === myName)) {
-      renderMessage(msg); scrollToBottom(); playSound();
+      renderMessage(msg); 
+      if (isScrolledToBottom()) scrollToBottom(); else showScrollDownBtn();
+      playSound();
     }
   });
 
@@ -355,7 +368,7 @@ function login() {
 
 function playSound() {
   const sound = document.getElementById('notifySound');
-  if (sound) { sound.volume = 0.5; sound.play().catch(() => {}); }
+  if (sound && document.hidden) { sound.volume = 0.5; sound.play().catch(() => {}); }
 }
 
 function updateProfileUI() {
@@ -379,17 +392,19 @@ function renderFriends() {
 
 function logout() { localStorage.removeItem('chat_username'); if (socket) socket.disconnect(); location.reload(); }
 
-// Мобильное меню (без оверлея, исправлено)
 function toggleMobileMenu() {
   const sidebar = document.getElementById('channelSidebar');
   const serverList = document.getElementById('serverList');
+  const overlay = document.getElementById('mobileOverlay');
   isMobileMenuOpen = !isMobileMenuOpen;
   if (isMobileMenuOpen) {
     sidebar.classList.add('mobile-open');
     serverList.classList.add('mobile-open');
+    overlay.style.display = 'block';
   } else {
     sidebar.classList.remove('mobile-open');
     serverList.classList.remove('mobile-open');
+    overlay.style.display = 'none';
   }
 }
 function closeMobileMenu() {
@@ -467,9 +482,10 @@ function sendMessage() {
   const tempId = 'temp-' + Date.now();
   const msgData = { text, tempId, replyTo: replyToMsg };
 
-  renderMessage({ ...msgData, id: tempId, username: myName, avatarColor: myColor, time: Date.now(), status: '✓' });
+  renderMessage({ ...msgData, id: tempId, username: myName, avatarColor: myColor, time: Date.now(), status: '🕒' });
   input.value = ''; cancelReply();
   document.getElementById('emojiPanel').style.display = 'none';
+  scrollToBottom();
   
   if (socket && socket.connected) {
     if (currentChatType === 'private') socket.emit('sendPrivate', { to: currentPeer, ...msgData });
@@ -479,7 +495,6 @@ function sendMessage() {
     const statusEl = document.getElementById(`status-${tempId}`);
     if (statusEl) { statusEl.textContent = '⚠️'; }
   }
-  scrollToBottom();
 }
 
 function flushQueue() {
@@ -562,26 +577,68 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+// Функции для скролла
+function isScrolledToBottom() {
+  const box = document.getElementById('messages');
+  return box.scrollHeight - box.scrollTop - box.clientHeight < 100;
+}
+function showScrollDownBtn() {
+  document.getElementById('scrollDownBtn').style.display = 'flex';
+}
+function handleScroll() {
+  if (isScrolledToBottom()) document.getElementById('scrollDownBtn').style.display = 'none';
+}
+function scrollToBottom(force = false) {
+  const box = document.getElementById('messages');
+  if (force || isScrolledToBottom()) {
+    box.scrollTop = box.scrollHeight;
+    document.getElementById('scrollDownBtn').style.display = 'none';
+  }
+}
+
+// Проверка даты
+function checkDateSeparator(timestamp) {
+  const date = new Date(timestamp);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+
+  let label = null;
+  if (date.toDateString() === today.toDateString()) label = 'Сегодня';
+  else if (date.toDateString() === yesterday.toDateString()) label = 'Вчера';
+  else label = date.toLocaleDateString('ru-RU');
+
+  if (label && label !== lastMessageDate) {
+    lastMessageDate = label;
+    const div = document.createElement('div');
+    div.className = 'date-separator';
+    div.textContent = label;
+    document.getElementById('messages').appendChild(div);
+  }
+}
+
 let lastAuthor = null;
 function renderMessage(msg, isHistory = false) {
   const box = document.getElementById('messages');
+  
   if (msg.type === 'system') {
     const div = document.createElement('div');
     div.className = 'msg system'; div.textContent = msg.text;
     box.appendChild(div); return;
   }
 
+  checkDateSeparator(msg.time);
+
   const isMine = msg.username === myName;
   const isSameAuthor = msg.username === lastAuthor && !msg.replyTo;
   const wrapper = document.createElement('div');
   wrapper.className = 'msg-row ' + (isMine ? 'mine' : 'other');
   wrapper.id = `msg-${msg.id || msg.tempId}`;
-  if (isSameAuthor && !isHistory) wrapper.classList.add('grouped');
   
   let contentHTML = '';
   if (msg.replyTo) contentHTML += `<div class="reply-preview">↪ ${msg.replyTo.username}: ${parseMarkdown(msg.replyTo.text || 'Вложение')}</div>`;
   if (msg.text) contentHTML += `<div class="bubble-text" id="text-${msg.id}">${parseMarkdown(msg.text)}</div>`;
-  if (msg.mediaType === 'image') contentHTML += `<div class="bubble-media"><img src="${msg.mediaUrl}" loading="lazy" onclick="window.open(this.src)"></div>`;
+  if (msg.mediaType === 'image') contentHTML += `<div class="bubble-media"><img src="${msg.mediaUrl}" loading="lazy" onclick="openImage('${msg.mediaUrl}')"></div>`;
   else if (msg.mediaType === 'audio') {
     contentHTML += `
       <div class="audio-player" id="player-${msg.id}">
@@ -598,8 +655,13 @@ function renderMessage(msg, isHistory = false) {
     <div class="bubble-container">
       ${!isMine && !isSameAuthor ? `<div class="bubble-author">${msg.username}</div>` : ''}
       <div class="bubble-content-wrapper">
-        <div class="bubble-text-content">${contentHTML}</div>
-        ${isMine ? `<div class="bubble-status" id="status-${msg.id || msg.tempId}">${msg.status || '✓'}</div>` : ''}
+        <div class="bubble-text-content">
+          ${contentHTML}
+          <div class="bubble-meta">
+            <span class="bubble-time">${new Date(msg.time).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'})}</span>
+            ${isMine ? `<span class="bubble-status" id="status-${msg.id || msg.tempId}">${msg.status || '✓✓'}</span>` : ''}
+          </div>
+        </div>
       </div>
       <div class="reactions-container" id="reactions-${msg.id}"></div>
       <div class="msg-actions">
@@ -622,6 +684,7 @@ function renderMessage(msg, isHistory = false) {
   lastAuthor = msg.username;
 }
 
+function openImage(url) { document.getElementById('fullImage').src = url; document.getElementById('imageViewer').style.display = 'flex'; }
 function addReaction(msgId, emoji) { if (msgId && !msgId.startsWith('temp-')) socket.emit('react', { messageId: msgId, emoji, isPrivate: currentChatType === 'private' }); }
 function deleteMsg(msgId) { if (confirm('Удалить?')) socket.emit('deleteMessage', { msgId, isPrivate: currentChatType === 'private' }); }
 function renderReactions(container, msgId, reactions) {
@@ -646,7 +709,6 @@ function toggleAudio(src, btn) {
   audio.onended = () => { btn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`; progress.style.width = '0%'; };
 }
 function formatTime(sec) { if (isNaN(sec)) return '0:00'; const m = Math.floor(sec / 60), s = Math.floor(sec % 60); return `${m}:${s < 10 ? '0' : ''}${s}`; }
-function scrollToBottom() { const box = document.getElementById('messages'); box.scrollTop = box.scrollHeight; }
 function addSystemMessage(text) { const box = document.getElementById('messages'); const div = document.createElement('div'); div.className = 'msg system'; div.textContent = text; box.appendChild(div); scrollToBottom(); }
 </script>
 </body>
