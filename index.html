@@ -30,7 +30,6 @@
 <!-- Основной интерфейс -->
 <div id="appScreen" class="app-screen" style="display:none;">
   
-  <!-- Левая панель -->
   <aside class="server-list">
     <div class="server-item home active" title="Главная">🏠</div>
     <div class="separator"></div>
@@ -38,7 +37,6 @@
     <div class="server-item add-room" onclick="showCreateRoom()" title="Создать комнату">+</div>
   </aside>
 
-  <!-- Панель участников -->
   <aside class="channel-sidebar">
     <div class="channel-header">
       <span id="currentRoomName">Выберите комнату</span>
@@ -48,6 +46,12 @@
     <div class="channel-section">
       <div class="channel-title">УЧАСТНИКИ — <span id="onlineCount">0</span></div>
       <ul id="onlineList" class="user-list"></ul>
+    </div>
+
+    <!-- Друзья -->
+    <div class="channel-section" style="border-top: 1px solid var(--glass-border);">
+      <div class="channel-title">ДРУЗЬЯ <button onclick="showInviteModal()" style="float:right; background:none; border:none; color:var(--accent); cursor:pointer;">+</button></div>
+      <ul id="friendsList" class="user-list"></ul>
     </div>
 
     <div class="user-panel">
@@ -62,7 +66,6 @@
     </div>
   </aside>
 
-  <!-- Чат -->
   <main class="chat-main">
     <div id="chatPlaceholder" class="chat-placeholder">
       <div class="placeholder-icon">💬</div>
@@ -85,11 +88,11 @@
         <button class="reply-close" onclick="cancelReply()">✕</button>
       </div>
 
-      <div class="typing-indicator" id="typing"></div>
+      <!-- Индикатор действий -->
+      <div class="typing-indicator" id="actionIndicator"></div>
       
       <div class="input-bar">
         <button id="micBtn" class="btn-mic" title="Голосовое" onclick="toggleRecording()">🎤</button>
-        <!-- Кнопка загрузки картинки -->
         <label class="btn-attach" title="Отправить фото">
           📎
           <input type="file" id="imageInput" accept="image/*" style="display:none;" onchange="uploadFile(this)">
@@ -106,7 +109,7 @@
   </main>
 </div>
 
-<!-- Модальное окно создания комнаты -->
+<!-- Модальные окна -->
 <div id="createRoomModal" class="modal-overlay" style="display:none;">
   <div class="modal-box">
     <h2>Создать комнату</h2>
@@ -120,7 +123,6 @@
   </div>
 </div>
 
-<!-- Модальное окно настроек -->
 <div id="settingsModal" class="modal-overlay" style="display:none;">
   <div class="modal-box">
     <h2>Настройки</h2>
@@ -139,7 +141,6 @@
   </div>
 </div>
 
-<!-- Модальное окно настроек комнаты -->
 <div id="roomSettingsModal" class="modal-overlay" style="display:none;">
   <div class="modal-box">
     <h2>Настройки комнаты</h2>
@@ -147,6 +148,34 @@
     <div class="modal-actions">
       <button class="btn-cancel" onclick="hideRoomSettings()">Закрыть</button>
       <button class="btn-create" style="background:#ef4444;" onclick="deleteRoom()">Удалить комнату</button>
+    </div>
+  </div>
+</div>
+
+<div id="inviteModal" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <h2>Добавить друга</h2>
+    <p>Введите ник пользователя, чтобы добавить его в друзья.</p>
+    <div class="input-wrap">
+      <input type="text" id="friendInput" placeholder="Ник друга" maxlength="20">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="hideInviteModal()">Отмена</button>
+      <button class="btn-create" onclick="addFriend()">Добавить</button>
+    </div>
+  </div>
+</div>
+
+<!-- Модальное окно редактирования -->
+<div id="editModal" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <h2>Редактировать сообщение</h2>
+    <div class="input-wrap">
+      <input type="text" id="editInput" maxlength="1000">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="hideEdit()">Отмена</button>
+      <button class="btn-create" onclick="saveEdit()">Сохранить</button>
     </div>
   </div>
 </div>
@@ -160,7 +189,10 @@ let currentRoom = '';
 let mediaRecorder = null;
 let audioChunks = [];
 let replyToMsg = null;
-let messageQueue = []; 
+let messageQueue = [];
+let editingMsgId = null;
+let myFriends = [];
+let statusTimeout = null;
 
 // --- Утилиты ---
 function getAvatarColor(name) {
@@ -185,27 +217,26 @@ window.onload = () => {
 function login() {
   const nick = document.getElementById('nickInput').value.trim();
   const color = document.getElementById('colorInput').value;
-  const err = document.getElementById('loginError');
-  
-  if (!nick) { err.textContent = 'Введите ник'; return; }
+  if (!nick) return;
 
   myName = nick;
   myColor = color;
   localStorage.setItem('chat_username', myName);
   localStorage.setItem('chat_color', myColor);
-  err.textContent = '';
-  
+
   socket = io({
-    transports: ['polling', 'websocket'],
+    transports: ['websocket', 'polling'],
     reconnection: true,
     reconnectionAttempts: Infinity,
-    reconnectionDelay: 1000
+    reconnectionDelay: 500,
+    reconnectionDelayMax: 3000
   });
 
   socket.on('connect', () => {
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('appScreen').style.display = 'flex';
-    updateMyProfileUI();
+    updateProfileUI();
+    socket.emit('auth', { username: myName, avatarColor: myColor });
     flushQueue();
   });
 
@@ -213,6 +244,7 @@ function login() {
     addSystemMessage("⚠️ Соединение потеряно. Восстанавливаем...");
   });
 
+  // --- Список комнат ---
   socket.on('roomList', (list) => {
     const container = document.getElementById('roomListContainer');
     container.innerHTML = '';
@@ -227,23 +259,39 @@ function login() {
     });
   });
 
+  // --- История ---
   socket.on('history', (messages) => {
     document.getElementById('chatPlaceholder').style.display = 'none';
     document.getElementById('activeChat').style.display = 'flex';
     document.getElementById('headerRoomName').textContent = currentRoom;
     document.getElementById('currentRoomName').textContent = currentRoom;
-
     const box = document.getElementById('messages');
     box.innerHTML = '';
     messages.forEach(msg => renderMessage(msg, true));
     scrollToBottom();
   });
 
+  // --- Новое сообщение ---
   socket.on('message', (msg) => { 
     renderMessage(msg); 
     scrollToBottom(); 
     if (document.hidden && Notification.permission === 'granted') {
       new Notification(`#${currentRoom}`, { body: `${msg.username}: ${msg.text || 'Вложение'}` });
+    }
+  });
+
+  // --- Редактирование ---
+  socket.on('messageEdited', ({ msgId, newText }) => {
+    const textEl = document.getElementById(`text-${msgId}`);
+    if (textEl) {
+      textEl.textContent = newText;
+      const bubble = textEl.closest('.bubble-text-content');
+      if (bubble && !bubble.querySelector('.edited-mark')) {
+        const mark = document.createElement('span');
+        mark.className = 'edited-mark';
+        mark.textContent = ' (изменено)';
+        bubble.appendChild(mark);
+      }
     }
   });
 
@@ -253,7 +301,7 @@ function login() {
   });
 
   socket.on('roomDeleted', () => {
-    alert('Эта комната была удалена создателем.');
+    alert('Эта комната была удалена.');
     location.reload();
   });
 
@@ -287,20 +335,49 @@ function login() {
     });
   });
 
-  socket.on('typing', ({ username, isTyping }) => {
-    const el = document.getElementById('typing');
-    if (isTyping) el.textContent = `${username} печатает...`;
-    else if (el.textContent.startsWith(username)) el.textContent = '';
+  // --- Статусы (печатает / записывает) ---
+  socket.on('userStatus', ({ username, type }) => {
+    const el = document.getElementById('actionIndicator');
+    if (type === 'typing') el.textContent = `${username} печатает...`;
+    else if (type === 'recording') el.textContent = `${username} записывает голосовое...`;
+    else el.textContent = '';
+  });
+
+  // --- Друзья ---
+  socket.on('friendsList', (friends) => {
+    myFriends = friends || [];
+    renderFriends();
   });
 }
 
-function updateMyProfileUI() {
+// --- UI профиля ---
+function updateProfileUI() {
   document.getElementById('myName').textContent = myName;
   const myAv = document.getElementById('myAvatar');
   myAv.textContent = myName.slice(0,2).toUpperCase();
   myAv.style.background = myColor;
 }
 
+function renderFriends() {
+  const list = document.getElementById('friendsList');
+  list.innerHTML = '';
+  if (myFriends.length === 0) {
+    list.innerHTML = '<li style="color:var(--text-muted); font-size:12px; padding:4px 8px;">Пока никого нет</li>';
+    return;
+  }
+  myFriends.forEach(f => {
+    const li = document.createElement('li');
+    li.className = 'user-list-item';
+    li.innerHTML = `
+      <div class="user-list-avatar" style="background:${getAvatarColor(f)}">${f.slice(0,2).toUpperCase()}</div>
+      <span class="user-list-name">${f}</span>
+      <span class="status-dot" style="background:${getAvatarColor(f)}"></span>
+    `;
+    list.appendChild(li);
+  });
+}
+
+// --- Выход ---
 function logout() {
   localStorage.removeItem('chat_username');
   if (socket) socket.disconnect();
@@ -322,9 +399,9 @@ function saveSettings() {
   myColor = newColor;
   localStorage.setItem('chat_username', myName);
   localStorage.setItem('chat_color', myColor);
-  updateMyProfileUI();
+  updateProfileUI();
   hideSettings();
-  // Переподключаемся к комнате с новым ником
+  socket.emit('auth', { username: myName, avatarColor: myColor }); // Обновляем на сервере
   if (currentRoom) enterRoom(currentRoom);
 }
 
@@ -339,18 +416,27 @@ function createRoom() {
 }
 function enterRoom(roomName) {
   currentRoom = roomName;
-  socket.emit('joinRoom', { username: myName, avatarColor: myColor, roomName });
+  socket.emit('joinRoom', { roomName });
 }
-function showRoomSettings() {
-  if (!currentRoom) return;
-  document.getElementById('roomSettingsModal').style.display = 'flex';
-}
+function showRoomSettings() { if (currentRoom) document.getElementById('roomSettingsModal').style.display = 'flex'; }
 function hideRoomSettings() { document.getElementById('roomSettingsModal').style.display = 'none'; }
 function deleteRoom() {
-  if (confirm('Вы уверены, что хотите удалить комнату?')) {
+  if (confirm('Удалить комнату?')) {
     socket.emit('deleteRoom', currentRoom);
     hideRoomSettings();
   }
+}
+
+// --- Друзья ---
+function showInviteModal() { document.getElementById('inviteModal').style.display = 'flex'; document.getElementById('friendInput').focus(); }
+function hideInviteModal() { document.getElementById('inviteModal').style.display = 'none'; }
+function addFriend() {
+  const friendName = document.getElementById('friendInput').value.trim();
+  if (!friendName || friendName === myName) return;
+  if (!myFriends.includes(friendName)) myFriends.push(friendName);
+  socket.emit('addFriend', friendName); // Отправляем на сервер (для сохранения)
+  hideInviteModal();
+  renderFriends();
 }
 
 // --- Отправка ---
@@ -365,8 +451,8 @@ function sendMessage() {
   renderMessage({ ...msgData, id: tempId, username: myName, avatarColor: myColor, time: Date.now(), status: '⏳' });
   input.value = '';
   cancelReply();
-  socket.emit('typing', false);
-
+  
+  // Мгновенно отправляем, не ждём
   if (socket && socket.connected) {
     socket.emit('message', msgData);
   } else {
@@ -388,20 +474,14 @@ function flushQueue() {
 async function uploadFile(inputEl) {
   const file = inputEl.files[0];
   if (!file) return;
-  
   const formData = new FormData();
   formData.append('file', file);
-
   try {
     const response = await fetch('/upload', { method: 'POST', body: formData });
     const data = await response.json();
-    if (data.url) {
-      socket.emit('message', { mediaUrl: data.url, mediaType: data.type, tempId: 'temp-file-' + Date.now() });
-    }
-  } catch (err) {
-    alert('Ошибка загрузки файла: ' + err.message);
-  }
-  inputEl.value = ''; // Сброс
+    if (data.url) socket.emit('message', { mediaUrl: data.url, mediaType: data.type, tempId: 'temp-file-' + Date.now() });
+  } catch (err) { alert('Ошибка: ' + err.message); }
+  inputEl.value = '';
 }
 
 // --- Запись ---
@@ -411,6 +491,7 @@ async function toggleRecording() {
     mediaRecorder.stop();
     micBtn.classList.remove('recording');
     micBtn.textContent = '🎤';
+    socket.emit('status', { type: 'idle' });
     return;
   }
 
@@ -429,7 +510,7 @@ async function toggleRecording() {
       try {
         const response = await fetch('/upload', { method: 'POST', body: formData });
         const data = await response.json();
-        if (data.url && socket) socket.emit('message', { mediaUrl: data.url, mediaType: 'audio', tempId: 'temp-audio-' + Date.now() });
+        if (data.url) socket.emit('message', { mediaUrl: data.url, mediaType: 'audio', tempId: 'temp-audio-' + Date.now() });
       } catch (err) { alert('Ошибка: ' + err.message); }
       stream.getTracks().forEach(t => t.stop());
     };
@@ -437,14 +518,14 @@ async function toggleRecording() {
     mediaRecorder.start();
     micBtn.classList.add('recording');
     micBtn.textContent = '⏹';
-  } catch (err) { alert('Нет доступа к микрофону: ' + err.message); }
+    socket.emit('status', { type: 'recording' }); // Сообщаем всем, что записываем
+  } catch (err) { alert('Нет доступа: ' + err.message); }
 }
 
 // --- Ответы ---
 function setReply(msg) {
   replyToMsg = msg;
-  const block = document.getElementById('replyBlock');
-  block.style.display = 'flex';
+  document.getElementById('replyBlock').style.display = 'flex';
   document.getElementById('replyText').textContent = `${msg.username}: ${msg.text || 'Вложение'}`;
   document.getElementById('msgInput').focus();
 }
@@ -453,16 +534,41 @@ function cancelReply() {
   document.getElementById('replyBlock').style.display = 'none';
 }
 
-// --- Уведомления ---
-function requestNotifications() {
-  if (!("Notification" in window)) return alert("Браузер не поддерживает уведомления");
-  Notification.requestPermission().then(p => { if (p === "granted") alert("Уведомления включены!"); });
+// --- Редактирование ---
+function openEdit(msg) {
+  editingMsgId = msg.id;
+  document.getElementById('editInput').value = msg.text;
+  document.getElementById('editModal').style.display = 'flex';
+  document.getElementById('editInput').focus();
+}
+function hideEdit() { document.getElementById('editModal').style.display = 'none'; editingMsgId = null; }
+function saveEdit() {
+  const newText = document.getElementById('editInput').value.trim();
+  if (newText && editingMsgId) socket.emit('editMessage', { msgId: editingMsgId, newText });
+  hideEdit();
 }
 
+// --- Уведомления ---
+function requestNotifications() {
+  if (!("Notification" in window)) return alert("Нет поддержки");
+  Notification.requestPermission().then(p => { if (p === "granted") alert("Включено!"); });
+}
+
+// --- Глобальные слушатели ---
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('nickInput').addEventListener('keypress', e => { if (e.key === 'Enter') login(); });
   document.getElementById('newRoomInput').addEventListener('keypress', e => { if (e.key === 'Enter') createRoom(); });
   document.getElementById('msgInput').addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(); });
+  document.getElementById('friendInput').addEventListener('keypress', e => { if (e.key === 'Enter') addFriend(); });
+  document.getElementById('editInput').addEventListener('keypress', e => { if (e.key === 'Enter') saveEdit(); });
+
+  // Статус "печатает" при вводе
+  document.getElementById('msgInput').addEventListener('input', () => {
+    if (!socket) return;
+    socket.emit('status', { type: 'typing' });
+    clearTimeout(statusTimeout);
+    statusTimeout = setTimeout(() => socket.emit('status', { type: 'idle' }), 1500);
+  });
 });
 
 // --- Рендер ---
@@ -470,7 +576,6 @@ let lastAuthor = null;
 
 function renderMessage(msg, isHistory = false) {
   const box = document.getElementById('messages');
-  
   if (msg.type === 'system') {
     const div = document.createElement('div');
     div.className = 'msg system';
@@ -487,24 +592,16 @@ function renderMessage(msg, isHistory = false) {
   if (isSameAuthor && !isHistory) wrapper.classList.add('grouped');
   
   let contentHTML = '';
-  if (msg.replyTo) {
-    contentHTML += `<div class="reply-preview">↪ ${msg.replyTo.username}: ${msg.replyTo.text || 'Вложение'}</div>`;
-  }
-  if (msg.text) contentHTML += `<div class="bubble-text"></div>`;
-  
-  // Рендер медиа
-  if (msg.mediaType === 'image') {
-    contentHTML += `<div class="bubble-media"><img src="${msg.mediaUrl}" loading="lazy" onclick="window.open(this.src)"></div>`;
-  } else if (msg.mediaType === 'audio') {
-    // Telegram-style плеер
+  if (msg.replyTo) contentHTML += `<div class="reply-preview">↪ ${msg.replyTo.username}: ${msg.replyTo.text || 'Вложение'}</div>`;
+  if (msg.text) contentHTML += `<div class="bubble-text" id="text-${msg.id}"></div>`;
+  if (msg.mediaType === 'image') contentHTML += `<div class="bubble-media"><img src="${msg.mediaUrl}" loading="lazy" onclick="window.open(this.src)"></div>`;
+  else if (msg.mediaType === 'audio') {
     contentHTML += `
       <div class="audio-player" id="player-${msg.id}">
         <button class="audio-play-btn" onclick="toggleAudio('${msg.mediaUrl}', this)">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
         </button>
-        <div class="audio-waveform">
-          <div class="audio-progress" id="progress-${msg.id}"></div>
-        </div>
+        <div class="audio-waveform"><div class="audio-progress" id="progress-${msg.id}"></div></div>
         <span class="audio-time" id="time-${msg.id}">0:00</span>
         <audio id="audio-el-${msg.id}" src="${msg.mediaUrl}" preload="metadata" style="display:none;"></audio>
       </div>
@@ -523,6 +620,7 @@ function renderMessage(msg, isHistory = false) {
       <div class="msg-actions">
         <button title="Ответить" onclick='setReply(${JSON.stringify(msg).replace(/'/g, "&#39;")})'>↪</button>
         <button title="Реакция" onclick='addReaction("${msg.id}", "❤️")'>❤️</button>
+        ${isMine && msg.text ? `<button title="Редактировать" onclick='openEdit(${JSON.stringify(msg).replace(/'/g, "&#39;")})'>✏️</button>` : ''}
         ${isMine ? `<button title="Удалить" onclick='deleteMsg("${msg.id}")'>🗑️</button>` : ''}
       </div>
     </div>
@@ -533,7 +631,6 @@ function renderMessage(msg, isHistory = false) {
   
   if (msg.id) {
     renderReactions(wrapper.querySelector('.reactions-container'), msg.id, msg.reactions);
-    // Если это аудио, нужно обновить время после загрузки метаданных
     if (msg.mediaType === 'audio') {
       const audio = document.getElementById(`audio-el-${msg.id}`);
       audio.onloadedmetadata = () => {
@@ -573,9 +670,7 @@ function toggleAudio(src, btn) {
   const audio = document.getElementById(audioId);
   const progress = btn.nextElementSibling.firstElementChild;
   
-  document.querySelectorAll('audio').forEach(a => {
-    if (a !== audio) { a.pause(); }
-  });
+  document.querySelectorAll('audio').forEach(a => { if (a !== audio) a.pause(); });
 
   if (audio.paused) {
     audio.play();
@@ -588,8 +683,7 @@ function toggleAudio(src, btn) {
   audio.ontimeupdate = () => {
     const pct = (audio.currentTime / audio.duration) * 100;
     progress.style.width = pct + '%';
-    const timeEl = btn.parentElement.querySelector('.audio-time');
-    timeEl.textContent = formatTime(audio.currentTime);
+    btn.parentElement.querySelector('.audio-time').textContent = formatTime(audio.currentTime);
   };
 
   audio.onended = () => {
