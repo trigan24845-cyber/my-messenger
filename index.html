@@ -3,85 +3,102 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>iMessage Комнаты</title>
+<title>Discord Clone</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<!-- Экран 1: Вход (Ник) -->
+<!-- Экран входа -->
 <div id="loginScreen" class="login-screen">
   <div class="login-box">
-    <div class="login-icon">💬</div>
-    <h1>Сообщения</h1>
-    <p>Введите ваш ник</p>
+    <div class="login-icon" style="font-size: 60px; margin-bottom: 20px;">👾</div>
+    <h1>Добро пожаловать!</h1>
+    <p>Мы рады видеть вас снова!</p>
     <div class="input-wrap">
-      <input type="text" id="nickInput" placeholder="Ваш ник" maxlength="20" autofocus>
+      <label>ИМЯ ПОЛЬЗОВАТЕЛЯ</label>
+      <input type="text" id="nickInput" placeholder="Введите ник" maxlength="20" autofocus>
     </div>
-    <button onclick="goToRooms()">Далее</button>
+    <button onclick="login()">Войти</button>
     <div class="login-error" id="loginError"></div>
   </div>
 </div>
 
-<!-- Экран 2: Лобби (Список комнат) -->
-<div id="lobbyScreen" class="lobby-screen" style="display:none;">
-  <div class="login-box" style="max-width: 450px;">
-    <div class="login-icon">🏠</div>
-    <h1>Выберите комнату</h1>
-    <p>Привет, <span id="lobbyNick" style="color:var(--accent); font-weight:bold;"></span>!</p>
-    
-    <div class="room-list" id="roomListContainer">
+<!-- Основной интерфейс (Discord-style) -->
+<div id="appScreen" class="app-screen" style="display:none;">
+  
+  <!-- Левая панель: Список комнат -->
+  <aside class="server-list">
+    <div class="server-item home active" title="Главная">🏠</div>
+    <div class="separator"></div>
+    <div id="roomListContainer" class="room-list-container">
       <!-- Сюда будут добавляться комнаты -->
     </div>
+    <div class="server-item add-room" onclick="showCreateRoom()" title="Создать комнату">+</div>
+  </aside>
 
-    <div style="margin-top: 20px; border-top: 1px solid var(--glass-border); padding-top: 20px;">
-      <div class="input-wrap">
-        <input type="text" id="newRoomInput" placeholder="Название новой комнаты..." maxlength="30">
+  <!-- Вторая панель: Название комнаты и участники -->
+  <aside class="channel-sidebar">
+    <div class="channel-header" id="currentRoomName">
+      Выберите комнату
+    </div>
+    
+    <div class="channel-section">
+      <div class="channel-title">УЧАСТНИКИ — <span id="onlineCount">0</span></div>
+      <ul id="onlineList" class="user-list"></ul>
+    </div>
+
+    <div class="user-panel">
+      <div class="user-panel-avatar" id="myAvatar">?</div>
+      <div class="user-panel-info">
+        <div class="user-panel-name" id="myName"></div>
+        <div class="user-panel-status">В сети</div>
       </div>
-      <button onclick="createRoom()">Создать комнату</button>
-    </div>
-  </div>
-</div>
-
-<!-- Экран 3: Чат -->
-<div id="chatScreen" class="chat-screen" style="display:none;">
-  <aside class="sidebar">
-    <div class="sidebar-header">
-      <h2>В комнате <span class="badge" id="onlineCount">0</span></h2>
-      <div style="font-size: 12px; color: var(--text-muted); margin-top: 5px;" id="currentRoomName">#</div>
-    </div>
-    <ul id="onlineList"></ul>
-    <div style="margin-top: auto; padding: 10px;">
-      <button class="btn-leave" style="width:100%;" onclick="leaveRoom()">← Выйти в лобби</button>
+      <button class="btn-leave" onclick="logout()" title="Выйти">⏻</button>
     </div>
   </aside>
 
-  <div class="chat-main">
-    <header>
-      <div class="header-left">
-        <div class="logo"># <span id="headerRoomName"></span></div>
-      </div>
-      <div class="user-info">
-        <div class="my-avatar" id="myAvatar">?</div>
-        <span id="myName"></span>
-      </div>
-    </header>
+  <!-- Правая часть: Чат -->
+  <main class="chat-main">
+    <div id="chatPlaceholder" class="chat-placeholder">
+      <div class="placeholder-icon">💬</div>
+      <h2>Добро пожаловать!</h2>
+      <p>Выберите комнату слева или создайте новую, чтобы начать общение.</p>
+    </div>
 
-    <section class="chat-area">
+    <div id="activeChat" class="active-chat" style="display:none;">
+      <header class="chat-header">
+        <div class="chat-header-name"><span class="hash">#</span> <span id="headerRoomName"></span></div>
+      </header>
+
       <div class="messages" id="messages"></div>
       <div class="typing-indicator" id="typing"></div>
       
       <div class="input-bar">
         <button id="micBtn" class="btn-mic" title="Записать голосовое" onclick="toggleRecording()">🎤</button>
         <div class="input-wrap">
-          <input type="text" id="msgInput" placeholder="Сообщение..." maxlength="1000">
+          <input type="text" id="msgInput" placeholder="Написать сообщение..." maxlength="1000">
         </div>
-        <button onclick="sendMessage()" title="Отправить" class="btn-send">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 19V5M5 12l7-7 7 7"/>
-          </svg>
+        <button onclick="sendMessage()" class="btn-send" title="Отправить">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
         </button>
       </div>
-    </section>
+    </div>
+  </main>
+</div>
+
+<!-- Модальное окно создания комнаты -->
+<div id="createRoomModal" class="modal-overlay" style="display:none;">
+  <div class="modal-box">
+    <h2>Создать комнату</h2>
+    <p>Дайте вашей комнате имя. Вы сможете изменить его позже.</p>
+    <div class="input-wrap">
+      <label>НАЗВАНИЕ КОМНАТЫ</label>
+      <input type="text" id="newRoomInput" placeholder="например: Игровая" maxlength="30">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="hideCreateRoom()">Отмена</button>
+      <button class="btn-create" onclick="createRoom()">Создать</button>
+    </div>
   </div>
 </div>
 
@@ -100,12 +117,12 @@ function makeAvatar(name) {
   const hue = Math.abs(hash) % 360;
   return {
     text: initials,
-    color: `linear-gradient(135deg, hsl(${hue}, 70%, 60%), hsl(${(hue + 40) % 360}, 70%, 50%))`
+    color: `hsl(${hue}, 60%, 50%)`
   };
 }
 
-// --- 1. Вход ---
-function goToRooms() {
+// --- Вход ---
+function login() {
   const nick = document.getElementById('nickInput').value.trim();
   const err = document.getElementById('loginError');
   if (!nick) { err.textContent = 'Введите ник'; return; }
@@ -114,7 +131,6 @@ function goToRooms() {
   myName = nick;
   err.textContent = '';
   
-  // Подключаемся к серверу
   socket = io({
     transports: ['polling', 'websocket'],
     reconnection: true,
@@ -123,44 +139,36 @@ function goToRooms() {
 
   socket.on('connect', () => {
     document.getElementById('loginScreen').style.display = 'none';
-    document.getElementById('lobbyScreen').style.display = 'flex';
-    document.getElementById('lobbyNick').textContent = myName;
+    document.getElementById('appScreen').style.display = 'flex';
+    
+    document.getElementById('myName').textContent = myName;
+    const av = makeAvatar(myName);
+    const myAv = document.getElementById('myAvatar');
+    myAv.textContent = av.text;
+    myAv.style.background = av.color;
   });
 
   socket.on('roomList', (list) => {
     const container = document.getElementById('roomListContainer');
     container.innerHTML = '';
     
-    if (list.length === 0) {
-      container.innerHTML = '<p style="color:var(--text-muted); font-size:14px; text-align:center;">Пока нет комнат. Создайте первую!</p>';
-      return;
-    }
-
     list.forEach(room => {
       const div = document.createElement('div');
-      div.className = 'room-item';
-      div.innerHTML = `
-        <span style="font-weight:bold; color:#fff;"># ${room.name}</span>
-        <span style="color:var(--accent); font-size:12px;">${room.count} чел.</span>
-      `;
+      div.className = 'server-item';
+      if (room.name === currentRoom) div.classList.add('active');
+      div.title = room.name;
+      div.textContent = room.name.charAt(0).toUpperCase();
       div.onclick = () => enterRoom(room.name);
       container.appendChild(div);
     });
   });
 
-  // Обработчики для чата
   socket.on('history', (messages) => {
-    document.getElementById('lobbyScreen').style.display = 'none';
-    document.getElementById('chatScreen').style.display = 'flex';
+    document.getElementById('chatPlaceholder').style.display = 'none';
+    document.getElementById('activeChat').style.display = 'flex';
     
-    document.getElementById('myName').textContent = myName;
     document.getElementById('headerRoomName').textContent = currentRoom;
-    document.getElementById('currentRoomName').textContent = `#${currentRoom}`;
-    
-    const av = makeAvatar(myName);
-    const myAv = document.getElementById('myAvatar');
-    myAv.textContent = av.text;
-    myAv.style.background = av.color;
+    document.getElementById('currentRoomName').textContent = currentRoom;
 
     const box = document.getElementById('messages');
     box.innerHTML = '';
@@ -177,9 +185,10 @@ function goToRooms() {
     users.forEach(u => {
       const av = makeAvatar(u);
       const li = document.createElement('li');
+      li.className = 'user-list-item';
       li.innerHTML = `
-        <div class="online-avatar" style="background:${av.color}">${av.text}</div>
-        <span class="online-name">${u === myName ? u + ' (вы)' : u}</span>
+        <div class="user-list-avatar" style="background:${av.color}">${av.text}</div>
+        <span class="user-list-name">${u === myName ? u + ' (вы)' : u}</span>
       `;
       if (u === myName) li.classList.add('me');
       list.appendChild(li);
@@ -193,12 +202,21 @@ function goToRooms() {
   });
 }
 
-// --- 2. Лобби ---
+// --- Комнаты ---
+function showCreateRoom() {
+  document.getElementById('createRoomModal').style.display = 'flex';
+  document.getElementById('newRoomInput').focus();
+}
+
+function hideCreateRoom() {
+  document.getElementById('createRoomModal').style.display = 'none';
+  document.getElementById('newRoomInput').value = '';
+}
+
 function createRoom() {
-  const input = document.getElementById('newRoomInput');
-  const name = input.value.trim();
+  const name = document.getElementById('newRoomInput').value.trim();
   if (!name) return;
-  input.value = '';
+  hideCreateRoom();
   enterRoom(name);
 }
 
@@ -207,12 +225,12 @@ function enterRoom(roomName) {
   socket.emit('joinRoom', { username: myName, roomName: roomName });
 }
 
-function leaveRoom() {
+function logout() {
   if (socket) socket.disconnect();
   location.reload();
 }
 
-// --- 3. Чат ---
+// --- Чат ---
 function sendMessage() {
   const input = document.getElementById('msgInput');
   const text = input.value.trim();
@@ -226,7 +244,7 @@ function sendMessage() {
   socket.emit('typing', false);
 }
 
-// --- Запись голосового ---
+// --- Голосовые ---
 async function toggleRecording() {
   const micBtn = document.getElementById('micBtn');
   
@@ -270,13 +288,9 @@ async function toggleRecording() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  const input = document.getElementById('msgInput');
-  const nickInput = document.getElementById('nickInput');
-  const newRoomInput = document.getElementById('newRoomInput');
-  
-  nickInput.addEventListener('keypress', e => { if (e.key === 'Enter') goToRooms(); });
-  newRoomInput.addEventListener('keypress', e => { if (e.key === 'Enter') createRoom(); });
-  input.addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(); });
+  document.getElementById('nickInput').addEventListener('keypress', e => { if (e.key === 'Enter') login(); });
+  document.getElementById('newRoomInput').addEventListener('keypress', e => { if (e.key === 'Enter') createRoom(); });
+  document.getElementById('msgInput').addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(); });
 });
 
 let lastAuthor = null;
@@ -296,6 +310,7 @@ function renderMessage(msg) {
   const wrapper = document.createElement('div');
   wrapper.className = 'msg-row ' + (isMine ? 'mine' : 'other');
   if (isSameAuthor) wrapper.classList.add('grouped');
+  
   const av = makeAvatar(msg.username);
   
   let contentHTML = '';
@@ -306,10 +321,9 @@ function renderMessage(msg) {
 
   wrapper.innerHTML = `
     <div class="msg-avatar" style="background:${av.color}">${av.text}</div>
-    <div class="bubble">
-      ${!isSameAuthor ? `<div class="bubble-author">${isMine ? 'Вы' : msg.username}</div>` : ''}
-      ${contentHTML}
-      <div class="bubble-time">${new Date(msg.time).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'})}</div>
+    <div class="bubble-container">
+      ${!isSameAuthor ? `<div class="bubble-author">${isMine ? 'Вы' : msg.username} <span class="bubble-time">${new Date(msg.time).toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'})}</span></div>` : ''}
+      <div class="bubble-text-content">${contentHTML}</div>
     </div>
   `;
   
