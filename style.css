@@ -244,7 +244,7 @@ html, body {
 .user-panel-status { font-size: 12px; color: var(--green); display: flex; align-items: center; gap: 4px;}
 .user-panel-status::before { content: ''; display: inline-block; width: 6px; height: 6px; background: var(--green); border-radius: 50%; }
 
-.btn-notify, .btn-leave {
+.btn-notify, .btn-leave, .btn-settings, .btn-room-settings {
   background: transparent;
   color: var(--text-muted);
   border: none;
@@ -254,7 +254,7 @@ html, body {
   border-radius: 8px;
   transition: all 0.2s;
 }
-.btn-notify:hover { color: var(--accent); background: rgba(168, 85, 247, 0.1); }
+.btn-notify:hover, .btn-settings:hover { color: var(--accent); background: rgba(168, 85, 247, 0.1); }
 .btn-leave:hover { color: var(--red); background: rgba(239, 68, 68, 0.1); }
 
 /* 3. Чат */
@@ -481,7 +481,7 @@ html, body {
 }
 .input-bar input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
 
-.btn-send, .btn-mic {
+.btn-send, .btn-mic, .btn-attach {
   width: 48px; height: 48px;
   border: none;
   border-radius: 16px;
@@ -491,8 +491,9 @@ html, body {
   display: flex; align-items: center; justify-content: center;
   transition: all 0.2s;
   border: 1px solid var(--glass-border);
+  font-size: 20px;
 }
-.btn-send:hover, .btn-mic:hover { background: rgba(255, 255, 255, 0.1); }
+.btn-send:hover, .btn-mic:hover, .btn-attach:hover { background: rgba(255, 255, 255, 0.1); }
 .btn-send { background: var(--accent); color: white; border-color: var(--accent); }
 .btn-send:hover { background: #9333ea; }
 
@@ -550,10 +551,12 @@ html, body {
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
 
+/* Адаптив */
 @media (max-width: 700px) {
   .app-screen { padding: 8px; gap: 8px; }
   .server-list { width: 60px; }
-  .channel-sidebar { display: none; } /* На телефоне скрываем панель участников */
+  .channel-sidebar { display: none; }
   .messages { padding: 12px; }
-  .input-bar { padding: 0 12px 12px 12px; }
+  .input-bar { padding: 0 12px 12px 12px; gap: 8px; }
+  .btn-send, .btn-mic, .btn-attach { width: 40px; height: 40px; border-radius: 12px; }
 }
