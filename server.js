@@ -7,7 +7,6 @@ const multer = require('multer');
 
 const app = express();
 const server = http.createServer(app);
-// Принудительный websocket для скорости (с фолбэком на polling для нестабильных сетей)
 const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST"] },
   transports: ['websocket', 'polling'],
@@ -43,60 +42,70 @@ app.post('/upload', upload.single('file'), (req, res) => {
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
-// --- База (в памяти + файл) ---
+// --- База ---
 let rooms = new Map();
-let users = new Map(); // { username: { friends: [], avatarColor } }
+let users = new Map();
+let privateChats = new Map();
 
+// Загрузка данных
 if (fs.existsSync(HISTORY_FILE)) {
   try {
     const data = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
-    for (const [roomName, roomData] of Object.entries(data)) {
-      rooms.set(roomName, { users: new Map(), history: roomData.history || [], creator: roomData.creator });
+    for (const [roomName, roomData] of Object.entries(data.rooms || {})) {
+      rooms.set(roomName, { users: new Map(), history: roomData.history || [], creator: roomData.creator, password: roomData.password || null });
     }
-  } catch (e) { console.error(e); }
-}
-if (fs.existsSync(USERS_FILE)) {
-  try {
-    const data = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
-    users = new Map(Object.entries(data));
+    if (data.users) users = new Map(Object.entries(data.users));
+    if (data.privateChats) privateChats = new Map(Object.entries(data.privateChats));
   } catch (e) { console.error(e); }
 }
 
-if (!rooms.has('Общий чат')) rooms.set('Общий чат', { users: new Map(), history: [], creator: 'System' });
+if (!rooms.has('Общий чат')) rooms.set('Общий чат', { users: new Map(), history: [], creator: 'System', password: null });
 
 function saveData() {
   const roomData = {};
-  rooms.forEach((r, name) => { roomData[name] = { history: r.history, creator: r.creator }; });
-  fs.writeFile(HISTORY_FILE, JSON.stringify(roomData, null, 2), () => {});
-  fs.writeFile(USERS_FILE, JSON.stringify(Object.fromEntries(users), null, 2), () => {});
+  rooms.forEach((r, name) => { roomData[name] = { history: r.history, creator: r.creator, password: r.password }; });
+  fs.writeFile(HISTORY_FILE, JSON.stringify({
+    rooms: roomData,
+    users: Object.fromEntries(users),
+    privateChats: Object.fromEntries(privateChats)
+  }, null, 2), () => {});
 }
 
 function broadcastRooms() {
   const list = [];
-  rooms.forEach((r, name) => list.push({ name, count: r.users.size }));
+  rooms.forEach((r, name) => {
+    list.push({ name, count: r.users.size, hasPassword: !!r.password });
+  });
   io.emit('roomList', list);
+}
+
+function getPrivateChatKey(u1, u2) {
+  return [u1, u2].sort().join('|');
 }
 
 io.on('connection', (socket) => {
   broadcastRooms();
 
-  // --- Вход/Авторизация ---
   socket.on('auth', ({ username, avatarColor }) => {
     socket.username = username;
     socket.avatarColor = avatarColor;
     if (!users.has(username)) users.set(username, { friends: [], avatarColor });
-    else users.get(username).avatarColor = avatarColor; // Обновляем цвет
+    else users.get(username).avatarColor = avatarColor;
     saveData();
-    
-    // Отправляем список друзей и приглашений (пока просто заглушка для друзей)
     socket.emit('friendsList', users.get(username).friends || []);
     broadcastRooms();
   });
 
   // --- Комнаты ---
-  socket.on('joinRoom', ({ roomName }) => {
-    if (!socket.username) return;
+  socket.on('joinRoom', ({ roomName, password }) => {
+    if (!socket.username || !rooms.has(roomName)) return;
+    const room = rooms.get(roomName);
     
+    if (room.password && room.password !== password && room.creator !== socket.username) {
+      socket.emit('roomError', 'Неверный пароль');
+      return;
+    }
+
     if (socket.roomName && rooms.has(socket.roomName)) {
       const old = rooms.get(socket.roomName);
       old.users.delete(socket.id);
@@ -106,19 +115,72 @@ io.on('connection', (socket) => {
     }
 
     socket.roomName = roomName;
-    if (!rooms.has(roomName)) rooms.set(roomName, { users: new Map(), history: [], creator: socket.username });
-
-    const room = rooms.get(roomName);
     room.users.set(socket.id, { username: socket.username, avatarColor: socket.avatarColor });
     socket.join(roomName);
 
-    socket.emit('history', room.history);
+    socket.emit('history', { type: 'room', history: room.history });
     io.to(roomName).emit('roomUsers', [...room.users.values()]);
     io.to(roomName).emit('message', { type: 'system', text: `${socket.username} присоединился`, time: Date.now() });
     broadcastRooms();
   });
 
-  // --- Сообщения (с мгновенной доставкой) ---
+  socket.on('createRoom', ({ name, password }) => {
+    if (!socket.username) return;
+    if (rooms.has(name)) { socket.emit('roomError', 'Комната уже существует'); return; }
+    rooms.set(name, { users: new Map(), history: [], creator: socket.username, password: password || null });
+    saveData();
+    broadcastRooms();
+  });
+
+  socket.on('deleteRoom', (roomName) => {
+    if (!rooms.has(roomName) || rooms.get(roomName).creator !== socket.username) return;
+    io.to(roomName).emit('roomDeleted');
+    rooms.delete(roomName);
+    saveData();
+    broadcastRooms();
+  });
+
+  socket.on('clearHistory', (roomName) => {
+    if (!rooms.has(roomName) || rooms.get(roomName).creator !== socket.username) return;
+    rooms.get(roomName).history = [];
+    saveData();
+    io.to(roomName).emit('historyCleared');
+  });
+
+  // --- Личные сообщения ---
+  socket.on('openPrivate', (friendName) => {
+    if (!socket.username) return;
+    const key = getPrivateChatKey(socket.username, friendName);
+    if (!privateChats.has(key)) privateChats.set(key, { history: [] });
+    socket.join(key);
+    socket.currentPrivate = key;
+    socket.emit('history', { type: 'private', history: privateChats.get(key).history, peer: friendName });
+  });
+
+  socket.on('sendPrivate', ({ to, text, mediaUrl, mediaType, replyTo, tempId }) => {
+    if (!socket.username) return;
+    const key = getPrivateChatKey(socket.username, to);
+    if (!privateChats.has(key)) privateChats.set(key, { history: [] });
+    const chat = privateChats.get(key);
+    
+    const msg = {
+      id: Date.now() + Math.random().toString(36).substr(2, 9),
+      username: socket.username,
+      avatarColor: socket.avatarColor,
+      text: text || '',
+      mediaUrl, mediaType, replyTo,
+      time: Date.now(),
+      reactions: {},
+      edited: false
+    };
+    chat.history.push(msg);
+    saveData();
+    
+    io.to(key).emit('privateMessage', { msg, to: to, from: socket.username });
+    socket.emit('messageDelivered', { id: tempId });
+  });
+
+  // --- Общие сообщения ---
   socket.on('message', (data) => {
     if (!socket.username || !socket.roomName) return;
     const room = rooms.get(socket.roomName);
@@ -142,70 +204,87 @@ io.on('connection', (socket) => {
     if (room.history.length > 300) room.history.shift();
     saveData();
     
-    // Мгновенная рассылка всем в комнате
     io.to(socket.roomName).emit('message', msg);
     socket.emit('messageDelivered', { id: data.tempId });
   });
 
-  // --- Редактирование ---
-  socket.on('editMessage', ({ msgId, newText }) => {
-    if (!socket.roomName) return;
-    const room = rooms.get(socket.roomName);
-    if (!room) return;
-    const msg = room.history.find(m => m.id === msgId);
+  // --- Редактирование, удаление, реакции ---
+  socket.on('editMessage', ({ msgId, newText, isPrivate }) => {
+    let history, target;
+    if (isPrivate) {
+      if (!socket.currentPrivate) return;
+      history = privateChats.get(socket.currentPrivate).history;
+      target = socket.currentPrivate;
+    } else {
+      if (!socket.roomName) return;
+      history = rooms.get(socket.roomName).history;
+      target = socket.roomName;
+    }
+    const msg = history.find(m => m.id === msgId);
     if (msg && msg.username === socket.username) {
-      msg.text = newText;
-      msg.edited = true;
+      msg.text = newText; msg.edited = true;
       saveData();
-      io.to(socket.roomName).emit('messageEdited', { msgId, newText, edited: true });
+      io.to(target).emit('messageEdited', { msgId, newText });
     }
   });
 
-  // --- Удаление ---
-  socket.on('deleteMessage', (msgId) => {
-    if (!socket.roomName) return;
-    const room = rooms.get(socket.roomName);
-    if (!room) return;
-    const idx = room.history.findIndex(m => m.id === msgId);
-    if (idx !== -1 && room.history[idx].username === socket.username) {
-      room.history.splice(idx, 1);
+  socket.on('deleteMessage', ({ msgId, isPrivate }) => {
+    let history, target;
+    if (isPrivate) {
+      if (!socket.currentPrivate) return;
+      history = privateChats.get(socket.currentPrivate).history;
+      target = socket.currentPrivate;
+    } else {
+      if (!socket.roomName) return;
+      history = rooms.get(socket.roomName).history;
+      target = socket.roomName;
+    }
+    const idx = history.findIndex(m => m.id === msgId);
+    if (idx !== -1 && history[idx].username === socket.username) {
+      history.splice(idx, 1);
       saveData();
-      io.to(socket.roomName).emit('messageDeleted', msgId);
+      io.to(target).emit('messageDeleted', msgId);
     }
   });
 
-  socket.on('deleteRoom', (roomName) => {
-    if (!rooms.has(roomName)) return;
-    if (rooms.get(roomName).creator !== socket.username) return;
-    io.to(roomName).emit('roomDeleted');
-    rooms.delete(roomName);
-    saveData();
-    broadcastRooms();
-  });
-
-  // --- Реакции ---
-  socket.on('react', ({ messageId, emoji }) => {
-    if (!socket.roomName) return;
-    const room = rooms.get(socket.roomName);
-    if (!room) return;
-    const msg = room.history.find(m => m.id === messageId);
+  socket.on('react', ({ messageId, emoji, isPrivate }) => {
+    let history, target;
+    if (isPrivate) {
+      if (!socket.currentPrivate) return;
+      history = privateChats.get(socket.currentPrivate).history;
+      target = socket.currentPrivate;
+    } else {
+      if (!socket.roomName) return;
+      history = rooms.get(socket.roomName).history;
+      target = socket.roomName;
+    }
+    const msg = history.find(m => m.id === messageId);
     if (!msg) return;
     if (!msg.reactions[emoji]) msg.reactions[emoji] = [];
     const i = msg.reactions[emoji].indexOf(socket.username);
-    if (i > -1) {
-      msg.reactions[emoji].splice(i, 1);
-      if (msg.reactions[emoji].length === 0) delete msg.reactions[emoji];
-    } else {
-      msg.reactions[emoji].push(socket.username);
-    }
+    if (i > -1) { msg.reactions[emoji].splice(i, 1); if (msg.reactions[emoji].length === 0) delete msg.reactions[emoji]; }
+    else msg.reactions[emoji].push(socket.username);
     saveData();
-    io.to(socket.roomName).emit('updateReactions', { messageId, reactions: msg.reactions });
+    io.to(target).emit('updateReactions', { messageId, reactions: msg.reactions });
   });
 
-  // --- Статусы (печатает / записывает) ---
-  socket.on('status', ({ type }) => { // type: 'typing', 'recording', 'idle'
-    if (!socket.username || !socket.roomName) return;
-    socket.to(socket.roomName).emit('userStatus', { username: socket.username, type });
+  // --- Друзья ---
+  socket.on('addFriend', (friendName) => {
+    if (!socket.username || !users.has(socket.username)) return;
+    const user = users.get(socket.username);
+    if (!user.friends) user.friends = [];
+    if (friendName !== socket.username && !user.friends.includes(friendName)) {
+      user.friends.push(friendName);
+      saveData();
+      socket.emit('friendsList', user.friends);
+    }
+  });
+
+  // --- Статусы ---
+  socket.on('status', ({ type }) => {
+    if (!socket.username) return;
+    if (socket.roomName) socket.to(socket.roomName).emit('userStatus', { username: socket.username, type });
+    if (socket.currentPrivate) socket.to(socket.currentPrivate).emit('userStatus', { username: socket.username, type });
   });
 
   socket.on('disconnect', () => {
